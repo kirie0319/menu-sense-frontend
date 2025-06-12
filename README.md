@@ -1,36 +1,170 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Japanese Menu Translator - Frontend
 
-## Getting Started
+A modern React/Next.js frontend application for translating Japanese restaurant menus using Google Vision API and OpenAI GPT-4.
 
-First, run the development server:
+## 🚀 Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Drag & Drop File Upload**: Easy image upload with preview
+- **Real-time Translation**: Extract text from menu images and translate to English
+- **Detailed Descriptions**: Get comprehensive explanations of Japanese dishes
+- **Beautiful UI**: Modern design with smooth animations using Framer Motion
+- **Responsive Design**: Works perfectly on desktop and mobile devices
+- **Error Handling**: Comprehensive error handling with user-friendly messages
+
+## 🛠 Tech Stack
+
+### Framework & Runtime
+- **Next.js 15** - React-based full-stack framework
+- **React 19** - UI library with latest features
+- **TypeScript** - Type-safe JavaScript
+
+### Styling & UI
+- **Tailwind CSS** - Utility-first CSS framework
+- **Framer Motion** - Animation library
+- **Lucide React** - Beautiful icon library
+
+### State Management & HTTP
+- **Zustand** - Lightweight state management
+- **Axios** - HTTP client for API communication
+
+### File Handling
+- **React Dropzone** - Drag & drop file upload
+- **clsx** - Conditional className utility
+
+## 📋 Prerequisites
+
+- Node.js 18.0 or higher
+- npm or yarn package manager
+- Backend server running (see ../menu_sensor_backend/)
+
+## 🔧 Installation
+
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+2. **Set up environment variables:**
+   Create a `.env.local` file in the project root:
+   ```
+   NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+   ```
+
+3. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
+
+4. **Open your browser:**
+   Navigate to [http://localhost:3000](http://localhost:3000)
+
+## 🏃‍♂️ Usage
+
+1. **Start the backend server** (see backend README for instructions)
+2. **Upload a menu image** by dragging & dropping or clicking to browse
+3. **Click "Translate Menu"** to process the image
+4. **View the results** with extracted text and detailed translations
+
+## 🔧 Configuration
+
+### Environment Variables
+
+- `NEXT_PUBLIC_API_BASE_URL`: Backend API base URL (default: http://localhost:8000)
+
+### API Endpoints
+
+The frontend communicates with these backend endpoints:
+- `POST /translate` - Upload and translate menu image
+- `GET /health` - Health check
+
+## 📁 Project Structure
+
+```
+src/
+├── app/                    # Next.js App Router
+│   ├── layout.tsx         # Root layout
+│   ├── page.tsx           # Home page
+│   └── globals.css        # Global styles
+├── components/            # React components
+│   ├── FileUpload.tsx     # File upload with drag & drop
+│   ├── MenuTranslator.tsx # Main application component
+│   └── TranslationResult.tsx # Results display
+├── lib/                   # Utilities
+│   ├── api.ts            # API client
+│   └── store.ts          # Zustand state management
+└── types/                # TypeScript type definitions
+    └── index.ts
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🧩 Components
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### MenuTranslator
+Main application component that orchestrates the translation workflow.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### FileUpload
+Handles file upload with drag & drop functionality, image preview, and validation.
 
-## Learn More
+### TranslationResult
+Displays extracted text and translated menu items with beautiful formatting.
 
-To learn more about Next.js, take a look at the following resources:
+## 🔄 State Management
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Using Zustand for simple and efficient state management:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```typescript
+interface TranslationState {
+  isLoading: boolean;
+  result: TranslationResponse | null;
+  error: string | null;
+  selectedFile: File | null;
+}
+```
 
-## Deploy on Vercel
+## 🚀 Deployment
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Development
+```bash
+npm run dev
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Production Build
+```bash
+npm run build
+npm start
+```
+
+### Linting
+```bash
+npm run lint
+```
+
+## 🤝 Backend Integration
+
+This frontend is designed to work with the FastAPI backend located in `../menu_sensor_backend/`. Make sure the backend is running before using the frontend application.
+
+## 📱 Browser Support
+
+- Chrome (latest)
+- Firefox (latest)
+- Safari (latest)
+- Edge (latest)
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+1. **Backend Connection Error**
+   - Ensure the backend server is running on port 8000
+   - Check the `NEXT_PUBLIC_API_BASE_URL` environment variable
+
+2. **File Upload Issues**
+   - Supported formats: JPG, PNG, GIF
+   - Maximum file size: 10MB
+
+3. **Translation Errors**
+   - Verify backend API keys are configured
+   - Check backend logs for detailed error messages
+
+## 📄 License
+
+This project is part of the Japanese Menu Translator application.
