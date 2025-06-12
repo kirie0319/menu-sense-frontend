@@ -816,7 +816,7 @@ const MenuTranslator = () => {
                   category: categoryName.toLowerCase().replace(/\s+/g, '_'),
                   categoryName: categoryName,
                   // Stage 2: 日本語名のみ
-                  original: item.name || item.japanese_name || 'Unknown',
+                  original: (item as Record<string, unknown>).name as string || (item as Record<string, unknown>).japanese_name as string || 'Unknown',
                   // Stage 3: 翻訳名が利用可能な場合は使用（リアルタイム反映）
                   name: (effectiveItem as any)?.english_name || (effectiveItem as any)?.translated_name || 
                     (isCurrentlyProcessing ? 'Translating...' : 'Pending translation...'),
@@ -1656,8 +1656,8 @@ const MenuTranslator = () => {
                 </h2>
                 <p className="text-gray-600">
                   {currentStage === 1 
-                    ? "Extracting text and identifying menu items" 
-                    : "Adding context, ingredients, and cultural insights"
+                    ? 'Extracting text and identifying menu items' 
+                    : 'Adding context, ingredients, and cultural insights'
                   }
                 </p>
               </div>
@@ -1889,7 +1889,7 @@ const MenuTranslator = () => {
                           💡 <strong>Timeout Debug Tips:</strong>
                         </p>
                         <ul className="text-yellow-700 text-sm space-y-1 ml-4">
-                          <li>• Click "🐛 Debug" button to monitor network and timing information</li>
+                          <li>• Click &quot;🐛 Debug&quot; button to monitor network and timing information</li>
                           <li>• Check browser console (F12) for detailed logs</li>
                           <li>• Stage 3 now uses Google Translate API for faster processing</li>
                           <li>• Try with a simpler menu image</li>
