@@ -26,7 +26,6 @@ interface TranslationStore extends TranslationState {
   setFile: (file: File | null) => void;
   translateMenu: () => Promise<void>;
   setProgressStage: (stage: number, status: string, message: string) => void;
-  setStageData: (stage: number, data: unknown) => void;
   clearResult: () => void;
   clearError: () => void;
   resetProgress: () => void;
@@ -142,7 +141,16 @@ export const useTranslationStore = create<TranslationStore>((set, get) => ({
             }
           }
           
-          get().setProgressStage(stage, status, message);
+          // 全ての状態更新を1回のset()呼び出しにまとめる（無限ループ防止）
+          const currentState = get();
+          const newProgressStages = currentState.progressStages.map((s) =>
+            s.stage === stage
+              ? { ...s, status: status as 'pending' | 'active' | 'completed' | 'error', message }
+              : s
+          );
+          
+          // 新しいstageDataを構築
+          let newStageData = { ...currentState.stageData };
           
           // 段階的データを設定（キー名の修正 + リアルタイム反映強化）
           if (data) {
@@ -153,23 +161,14 @@ export const useTranslationStore = create<TranslationStore>((set, get) => ({
             
             if (stage === 2 && stageData.categories) {
               console.log(`[Store] 📋 Setting Stage 2 data: ${Object.keys(stageData.categories as Record<string, unknown>).length} categories`);
-              get().setStageData(2, stageData.categories);
+              newStageData.categories = stageData.categories as Record<string, unknown[]>;
             } else if (stage === 3) {
               // Stage 3では複数のキー名でデータが送信される可能性がある
               const translatedData = stageData.translatedCategories || stageData.translated_categories;
               if (translatedData) {
                 console.log(`[Store] 🌍 Setting Stage 3 data: ${Object.keys(translatedData as Record<string, unknown>).length} categories`);
                 console.log(`[Store] 🌍 Stage 3 data source:`, stageData.translatedCategories ? 'translatedCategories' : 'translated_categories');
-                get().setStageData(3, translatedData);
-                
-                // リアルタイム反映のため、現在のstageDataを即座に更新
-                const currentStageData = get().stageData;
-                set({ 
-                  stageData: { 
-                    ...currentStageData, 
-                    translatedCategories: translatedData as Record<string, unknown[]> 
-                  } 
-                });
+                newStageData.translatedCategories = translatedData as Record<string, unknown[]>;
               } else {
                 console.log(`[Store] ⚠️ Stage 3 data not found in keys:`, Object.keys(stageData));
               }
@@ -181,31 +180,37 @@ export const useTranslationStore = create<TranslationStore>((set, get) => ({
               
               if (finalData) {
                 console.log(`[Store] 📝 Setting Stage 4 final data: ${Object.keys(finalData as Record<string, unknown>).length} categories`);
-                get().setStageData(4, finalData);
+                newStageData.finalMenu = finalData as Record<string, unknown[]>;
               }
               
               // リアルタイム部分結果の反映
-              if (partialResults || partialMenu) {
-                console.log(`[Store] 🔄 Setting Stage 4 partial data:`, {
-                  partialResults: partialResults ? Object.keys(partialResults as Record<string, unknown>).length : 0,
-                  partialMenu: partialMenu ? Object.keys(partialMenu as Record<string, unknown>).length : 0
-                });
-                
-                const currentStageData = get().stageData;
-                const updatedStageData = { ...currentStageData };
-                
-                // partial_resultsとpartial_menuの両方を反映
-                if (partialResults) {
-                  updatedStageData.partialResults = partialResults as Record<string, unknown[]>;
-                }
-                if (partialMenu) {
-                  updatedStageData.partialMenu = partialMenu as Record<string, unknown[]>;
-                }
-                
-                set({ stageData: updatedStageData });
+              if (partialResults) {
+                console.log(`[Store] 🔄 Setting Stage 4 partial results: ${Object.keys(partialResults as Record<string, unknown>).length} categories`);
+                newStageData.partialResults = partialResults as Record<string, unknown[]>;
+              }
+              if (partialMenu) {
+                console.log(`[Store] 🔄 Setting Stage 4 partial menu: ${Object.keys(partialMenu as Record<string, unknown>).length} categories`);
+                newStageData.partialMenu = partialMenu as Record<string, unknown[]>;
               }
             }
+            
+            // その他のstageDataもコピー（streaming_update, newly_processed_itemsなど）
+            const {
+              categories, translated_categories, translatedCategories,
+              final_menu, finalMenu, partial_results, partial_menu,
+              ...otherData
+            } = stageData;
+            
+            // その他のデータを直接stageDataに含める（リアルタイム情報用）
+            newStageData = { ...newStageData, ...otherData };
           }
+          
+          // 全ての更新を1回で実行（無限ループ防止）
+          set({ 
+            currentStage: stage,
+            progressStages: newProgressStages,
+            stageData: newStageData
+          });
         }
       );
       
@@ -247,25 +252,7 @@ export const useTranslationStore = create<TranslationStore>((set, get) => ({
     });
   },
 
-  // 段階的データを設定
-  setStageData: (stage: number, data: unknown) => {
-    const { stageData } = get();
-    const newStageData = { ...stageData };
-    
-    switch (stage) {
-      case 2:
-        newStageData.categories = data as Record<string, unknown[]>;
-        break;
-      case 3:
-        newStageData.translatedCategories = data as Record<string, unknown[]>;
-        break;
-      case 4:
-        newStageData.finalMenu = data as Record<string, unknown[]>;
-        break;
-    }
-    
-    set({ stageData: newStageData });
-  },
+  // setStageData関数は不要になりました（統合されたため）
 
   // 進捗をリセット
   resetProgress: () => {

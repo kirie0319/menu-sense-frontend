@@ -93,6 +93,8 @@ const MenuTranslator = () => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isServerHealthy, setIsServerHealthy] = useState(false);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
+  const [stage3Completed, setStage3Completed] = useState(false);
+  const [translatedMenuVisible, setTranslatedMenuVisible] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(undefined);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [stage1Progress, setStage1Progress] = useState(0);
@@ -120,23 +122,25 @@ const MenuTranslator = () => {
     setFile 
   } = useTranslationStore();
 
-  // stageDataの変更を強制的に監視（デバッグ用）
-  const [forceUpdateCounter, setForceUpdateCounter] = useState(0);
+  // stageDataの変更を監視（デバッグ用・無限ループ修正版）
+  const lastStageDataRef = useRef<string>('');
   
   useEffect(() => {
-    // stageDataが変更されるたびに強制更新をトリガー
+    // stageDataが変更された場合のみログ出力（無限ループ防止）
     if (stageData && Object.keys(stageData).length > 0) {
-      console.log('🔄 [MenuTranslator] stageData changed, forcing update:', {
-        timestamp: new Date().toLocaleTimeString(),
-        stageDataKeys: Object.keys(stageData),
-        categoriesCount: Object.keys((stageData as StageData).categories || {}).length,
-        translatedCount: Object.keys((stageData as StageData).translatedCategories || {}).length,
-        partialCount: Object.keys((stageData as StageData).partialResults || {}).length,
-        forceUpdateCounter
-      });
-      setForceUpdateCounter(prev => prev + 1);
+      const currentDataString = JSON.stringify(stageData);
+      if (currentDataString !== lastStageDataRef.current) {
+        lastStageDataRef.current = currentDataString;
+        console.log('🔄 [MenuTranslator] stageData changed:', {
+          timestamp: new Date().toLocaleTimeString(),
+          stageDataKeys: Object.keys(stageData),
+          categoriesCount: Object.keys((stageData as StageData).categories || {}).length,
+          translatedCount: Object.keys((stageData as StageData).translatedCategories || {}).length,
+          partialCount: Object.keys((stageData as StageData).partialResults || {}).length
+        });
+      }
     }
-  }, [stageData, forceUpdateCounter]);
+  }, [stageData]); // 依存配列を最小限に
 
   // 翻訳が完了したときに分析画面を閉じる
   useEffect(() => {
@@ -151,6 +155,15 @@ const MenuTranslator = () => {
       setIsAnalyzing(false);
     }
   }, [error, isAnalyzing]);
+
+  // Stage3完了時の翻訳メニュー表示制御
+  useEffect(() => {
+    if (stageData && (stageData as any).show_translated_menu && currentStage === 3) {
+      setStage3Completed(true);
+      setTranslatedMenuVisible(true);
+      console.log('🌍 Stage3 completed! Showing translated menu');
+    }
+  }, [stageData, currentStage]);
 
   // Stage 1とStage 2のアイテムデータ
   const stage1Items = [
@@ -369,11 +382,17 @@ const MenuTranslator = () => {
     setFile(null);
     setIsAnalyzing(false); // 分析画面から戻る
     setCurrentSessionId(undefined);
+    
+    // Stage3&4関連の状態もリセット
+    setStage3Completed(false);
+    setTranslatedMenuVisible(false);
+    
     // 進捗をリセット
     setStage1Progress(0);
     setStage2Progress(0);
     setDetectedItems([]);
     setAnalysisItems([]);
+    
     // UberEatsスタイルメニューをリセット
     setFavorites(new Set<number>());
     setSelectedCategory('all');
@@ -706,9 +725,27 @@ const MenuTranslator = () => {
     // translationProgress state removed as unused
     const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
     const [newItemAnimations, setNewItemAnimations] = useState<Set<number>>(new Set());
+    const [streamingUpdates, setStreamingUpdates] = useState<Set<string>>(new Set());
 
-    // SSEからのstageDataを監視してリアルタイムでメニューを更新（Stage3&4リアルタイム強化 + 強制更新）
+    // stageDataが実際に変更された時のみ処理するためのref
+    const lastProcessedDataRef = useRef<string>('');
+    
+    // SSEからのstageDataを監視してリアルタイムでメニューを更新（Stage3&4リアルタイム強化 + 無限ループ防止）
     useEffect(() => {
+      if (!stageData) return;
+      
+      // データが実際に変更されているかチェック（無限ループ防止）
+      const currentDataString = JSON.stringify(stageData);
+      if (currentDataString === lastProcessedDataRef.current) {
+        return; // データに変更がないのでスキップ
+      }
+      lastProcessedDataRef.current = currentDataString;
+      
+      console.log('[RealtimeMenu] 📊 Processing new stageData:', {
+        timestamp: new Date().toLocaleTimeString(),
+        stage: currentStage
+      });
+      
       if (stageData) {
         const categories = (stageData as StageData).categories as Record<string, unknown[]> || {};
         const translatedCategories = (stageData as StageData).translatedCategories as Record<string, unknown[]> || {};
@@ -751,10 +788,42 @@ const MenuTranslator = () => {
 
         console.log('[RealtimeMenu] 🔍 Raw SSE Data:', JSON.stringify(stageData, null, 2));
         console.log('[RealtimeMenu] Enhanced SSE Data Update:', debugInfo);
+        
+        // Stage別の詳細ログ
+        if (currentStage === 3 && Object.keys(translatedCategories).length > 0) {
+          console.log('🌍 [Stage3] Translation data received:', Object.keys(translatedCategories));
+        }
+        if (currentStage >= 4 && Object.keys(partialResults).length > 0) {
+          console.log('📝 [Stage4] Partial results received:', Object.keys(partialResults));
+        }
 
         // 重要な更新があった場合は視覚的にハイライト
         if (Object.keys(translatedCategories).length > 0 || Object.keys(partialResults).length > 0) {
           console.log('🚀 [RealtimeMenu] IMPORTANT UPDATE DETECTED - should trigger UI update!');
+        }
+
+        // Stage4のストリーミング更新を検出
+        if ((stageData as any).streaming_update && (stageData as any).newly_processed_items) {
+          console.log('📺 [Stage4 Streaming] New items processed:', (stageData as any).newly_processed_items);
+          
+          // 新しく処理されたアイテムを一時的にハイライト
+          const newItems = (stageData as any).newly_processed_items as any[];
+          const itemNames = newItems.map(item => item.japanese_name || item.name).filter(Boolean);
+          
+          setStreamingUpdates(new Set(itemNames));
+          
+          // 3秒後にハイライトを削除
+          setTimeout(() => {
+            setStreamingUpdates(new Set());
+          }, 3000);
+        }
+
+        // Stage4のカテゴリ完了を検出
+        if ((stageData as any).category_completion && (stageData as any).category_completed) {
+          console.log('🎯 [Stage4 Category] Completed:', (stageData as any).category_completed);
+          
+          // カテゴリ完了のお祝いアニメーション効果（オプション）
+          // 今回は簡単にコンソールログで確認
         }
 
         // Category progress calculation removed as unused
@@ -891,7 +960,7 @@ const MenuTranslator = () => {
           setLastUpdateTime(Date.now());
         }
       }
-    }, [stageData, currentStage, isAnalyzing, isLoading, forceUpdateCounter]); // 強制更新カウンターを追加
+    }, [stageData]); // 依存配列を最小限に（無限ループ防止）
 
     // リアルタイム反映の強制更新（Cursor風の徐々に表示効果）
     useEffect(() => {
@@ -973,9 +1042,10 @@ const MenuTranslator = () => {
         }
       };
 
-      // Cursor風の徐々に表示効果
+      // Cursor風の徐々に表示効果 + ストリーミング更新ハイライト
       const isNewlyTranslated = newItemAnimations.has(item.id);
-      const shouldHighlight = isNewlyTranslated || item.isCurrentlyProcessing || item.isPartiallyComplete;
+      const isStreamingUpdate = streamingUpdates.has(item.original) || streamingUpdates.has(item.name);
+      const shouldHighlight = isNewlyTranslated || item.isCurrentlyProcessing || item.isPartiallyComplete || isStreamingUpdate;
 
       return (
         <div 
@@ -992,6 +1062,10 @@ const MenuTranslator = () => {
           } ${
             isNewlyTranslated 
               ? 'transform scale-105 ring-2 ring-blue-300 shadow-lg animate-pulse' 
+              : ''
+          } ${
+            isStreamingUpdate
+              ? 'transform scale-105 ring-2 ring-green-300 shadow-lg animate-bounce'
               : ''
           } ${
             shouldHighlight 
@@ -1093,7 +1167,7 @@ const MenuTranslator = () => {
              <div className="text-center">
                <h1 className="text-lg sm:text-xl font-bold text-gray-900 mb-1">
                  {currentStage === 2 && 'Menu Structure Detected'}
-                 {currentStage === 3 && 'Translating Menu Items'}
+                 {currentStage === 3 && (stage3Completed ? '✅ Translation Complete!' : 'Translating Menu Items')}
                  {currentStage >= 4 && 'Adding Detailed Information'}
             </h1>
 
@@ -1101,7 +1175,7 @@ const MenuTranslator = () => {
                {isDebugVisible && (
                  <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
                    <div className="text-left space-y-1">
-                     <div>🔄 Update #{forceUpdateCounter} at {new Date(lastUpdateTime).toLocaleTimeString()}</div>
+                     <div>🔄 Updated at {new Date(lastUpdateTime).toLocaleTimeString()}</div>
                      <div>📊 Items: {realtimeMenuItems.length} | 🌍 Translated: {realtimeMenuItems.filter(item => item.isTranslated).length} | 🔄 Partial: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length} | ✅ Complete: {realtimeMenuItems.filter(item => item.isComplete).length}</div>
                      <div>📋 Raw Categories: {Object.keys((stageData as StageData).categories || {}).length}</div>
                      <div>🌍 Translated Categories: {Object.keys((stageData as StageData).translatedCategories || {}).length}</div>
@@ -1124,31 +1198,49 @@ const MenuTranslator = () => {
                {/* Stage3 詳細進捗表示 */}
                {currentStage === 3 && (
                  <div className="space-y-1">
-                   <p className="text-xs sm:text-sm text-gray-600">
-                     {realtimeMenuItems.filter(item => item.isTranslated).length} of {realtimeMenuItems.length} items translated
-                   </p>
-                   {stageData && (stageData as any).processing_category && (
-                     <div className="flex items-center justify-center space-x-2">
-                       <span className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span>
-                       <p className="text-xs text-orange-600 font-medium">
-                         Translating: {(stageData as any).processing_category}
+                   {stage3Completed ? (
+                     <div className="bg-green-50 rounded-lg p-2 border border-green-200">
+                       <p className="text-xs sm:text-sm text-green-800 font-medium">
+                         🎉 All {realtimeMenuItems.length} items translated successfully!
+                       </p>
+                       {stageData && (stageData as any).translation_method && (
+                         <p className="text-xs text-green-600">
+                           Method: {(stageData as any).translation_method === 'google_translate' ? 'Google Translate API' : 'OpenAI'}
+                         </p>
+                       )}
+                       <p className="text-xs text-green-600">
+                         ✨ Now adding detailed descriptions...
                        </p>
                      </div>
-                   )}
-                   {stageData && (stageData as any).progress_percent && (
-                     <p className="text-xs text-blue-600">
-                       {Math.round((stageData as any).progress_percent)}% complete
-                     </p>
-                   )}
-                   {stageData && (stageData as any).elapsed_time && (
-                     <p className="text-xs text-gray-500">
-                       Elapsed: {Math.round((stageData as any).elapsed_time / 1000)}s
-                     </p>
+                   ) : (
+                     <>
+                       <p className="text-xs sm:text-sm text-gray-600">
+                         {realtimeMenuItems.filter(item => item.isTranslated).length} of {realtimeMenuItems.length} items translated
+                       </p>
+                       {stageData && (stageData as any).processing_category && (
+                         <div className="flex items-center justify-center space-x-2">
+                           <span className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span>
+                           <p className="text-xs text-orange-600 font-medium">
+                             Translating: {(stageData as any).processing_category}
+                           </p>
+                         </div>
+                       )}
+                       {stageData && (stageData as any).progress_percent && (
+                         <p className="text-xs text-blue-600">
+                           {Math.round((stageData as any).progress_percent)}% complete
+                         </p>
+                       )}
+                       {stageData && (stageData as any).elapsed_time && (
+                         <p className="text-xs text-gray-500">
+                           Elapsed: {Math.round((stageData as any).elapsed_time / 1000)}s
+                         </p>
+                       )}
+                     </>
                    )}
                  </div>
                )}
 
-               {/* Stage4 詳細進捗表示 */}
+               {/* Stage4 詳細進捗表示（ストリーミング強化） */}
                {currentStage >= 4 && (
                  <div className="space-y-1">
                    <p className="text-xs sm:text-sm text-gray-600">
@@ -1158,6 +1250,8 @@ const MenuTranslator = () => {
                      Complete: {realtimeMenuItems.filter(item => item.isComplete).length} | 
                      Updating: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length}
                    </p>
+                   
+                   {/* リアルタイム処理状況 */}
                    {stageData && (stageData as any).processing_category && (
                      <div className="flex items-center justify-center space-x-2">
                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
@@ -1166,6 +1260,33 @@ const MenuTranslator = () => {
                        </p>
                      </div>
                    )}
+                   
+                   {/* ストリーミング更新の表示 */}
+                   {stageData && (stageData as any).streaming_update && (
+                     <div className="bg-green-50 rounded-lg p-2 border border-green-200">
+                       <p className="text-xs text-green-800 font-medium">
+                         📺 {(stageData as any).newly_processed_items?.length || 0} items updated in real-time
+                       </p>
+                       {(stageData as any).chunk_completed && (
+                         <p className="text-xs text-green-600">
+                           Progress: Chunk {(stageData as any).chunk_completed}
+                         </p>
+                       )}
+                     </div>
+                   )}
+                   
+                   {/* カテゴリ完了の表示 */}
+                   {stageData && (stageData as any).category_completion && (
+                     <div className="bg-blue-50 rounded-lg p-2 border border-blue-200">
+                       <p className="text-xs text-blue-800 font-medium">
+                         🎯 {(stageData as any).category_completed} category completed!
+                       </p>
+                       <p className="text-xs text-blue-600">
+                         {(stageData as any).category_items} items with detailed descriptions
+                       </p>
+                     </div>
+                   )}
+                   
                    {stageData && (stageData as any).progress_percent && (
                      <p className="text-xs text-green-600">
                        {Math.round((stageData as any).progress_percent)}% complete
@@ -1883,6 +2004,36 @@ const MenuTranslator = () => {
                     </h3>
                     <p className="text-red-700 mb-4">{error}</p>
                     
+                    {/* Stage1 OCRエラーの場合の詳細ヒント */}
+                    {(error.includes('OCR') || error.includes('Vision API') || error.includes('画像から') || error.includes('テキストを検出')) && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                        <p className="text-blue-800 text-sm mb-2">
+                          📷 <strong>Image Recognition Tips:</strong>
+                        </p>
+                        <ul className="text-blue-700 text-sm space-y-1 ml-4">
+                          <li>• Use clear, well-lit photos with readable text</li>
+                          <li>• Make sure menu text is large and in focus</li>
+                          <li>• Avoid blurry or dark images</li>
+                          <li>• Try taking the photo from directly above the menu</li>
+                          <li>• Ensure the entire menu fits in the frame</li>
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {/* Google Vision API認証エラーの場合 */}
+                    {(error.includes('Vision API') || error.includes('認証') || error.includes('利用できません')) && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                        <p className="text-yellow-800 text-sm mb-2">
+                          🔧 <strong>Service Configuration Issue:</strong>
+                        </p>
+                        <ul className="text-yellow-700 text-sm space-y-1 ml-4">
+                          <li>• Google Vision API service may be temporarily unavailable</li>
+                          <li>• Please contact administrator or try again later</li>
+                          <li>• This is likely a server configuration issue, not your image</li>
+                        </ul>
+                      </div>
+                    )}
+                    
                     {/* タイムアウトエラーの場合のデバッグヒント */}
                     {(error.includes('timeout') || error.includes('timed out')) && (
                       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
@@ -1894,6 +2045,21 @@ const MenuTranslator = () => {
                           <li>• Check browser console (F12) for detailed logs</li>
                           <li>• Stage 3 now uses Google Translate API for faster processing</li>
                           <li>• Try with a simpler menu image</li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* ネットワークエラーの場合 */}
+                    {(error.includes('network') || error.includes('connection') || error.includes('fetch')) && (
+                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-4">
+                        <p className="text-purple-800 text-sm mb-2">
+                          🌐 <strong>Connection Issue:</strong>
+                        </p>
+                        <ul className="text-purple-700 text-sm space-y-1 ml-4">
+                          <li>• Check your internet connection</li>
+                          <li>• The server may be temporarily busy</li>
+                          <li>• Wait a few moments and try again</li>
+                          <li>• Contact support if the problem persists</li>
                         </ul>
                       </div>
                     )}
@@ -1915,6 +2081,56 @@ const MenuTranslator = () => {
                           🐛 Enable Debug Mode
                         </button>
                       )}
+
+                      {/* システム診断ボタン */}
+                      <button
+                        onClick={async () => {
+                          try {
+                            // バックエンドの診断エンドポイントを呼び出し
+                            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+                            const response = await fetch(`${backendUrl}/diagnostic`);
+                            const data = await response.json();
+                            console.log('🔍 System Diagnostic:', data);
+                            
+                            // 診断結果を整理してユーザーフレンドリーに表示
+                            const statusReport = `
+システム診断結果:
+
+🔍 Google Vision API: ${data.vision_api?.available ? '✅ 利用可能' : '❌ 利用不可'}
+${data.vision_api?.error ? `   エラー: ${data.vision_api.error}` : ''}
+
+🤖 OpenAI API: ${data.openai_api?.available ? '✅ 利用可能' : '❌ 利用不可'}
+${data.openai_api?.error ? `   エラー: ${data.openai_api.error}` : ''}
+
+🌍 Google Translate API: ${data.translate_api?.available ? '✅ 利用可能' : '❌ 利用不可'}
+${data.translate_api?.error ? `   エラー: ${data.translate_api.error}` : ''}
+
+環境設定:
+- Google認証情報: ${data.environment?.google_credentials_available ? '✅' : '❌'}
+- OpenAI APIキー: ${data.environment?.openai_api_key_env ? '✅' : '❌'}
+
+${!data.vision_api?.available ? '\n⚠️ Vision APIの問題が原因でStage1エラーが発生している可能性があります。' : ''}
+                            `.trim();
+                            
+                            alert(statusReport);
+                          } catch (error) {
+                            console.error('診断エラー:', error);
+                            alert(`診断に失敗しました: ${error}\n\nバックエンドサーバーが起動していることを確認してください。`);
+                          }
+                        }}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                      >
+                        🔍 Check System Status
+                      </button>
+
+                      {/* 新しい画像を選択するボタン */}
+                      <button
+                        onClick={handleFileSelect}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        <Camera className="inline-block h-4 w-4 mr-2" />
+                        Try Different Image
+                      </button>
                     </div>
                   </div>
                 </div>
