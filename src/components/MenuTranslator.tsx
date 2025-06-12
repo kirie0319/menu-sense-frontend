@@ -405,39 +405,7 @@ const MenuTranslator = () => {
     setFavorites(newFavorites);
   };
 
-  // 実際のメニューデータからUberEatsスタイルの形式に変換
-  const convertToUberEatsFormat = (finalMenu: Record<string, unknown[]>): MenuItem[] => {
-    if (!finalMenu) return [];
-    
-    const items: MenuItem[] = [];
-    let itemId = 1;
-    
-    Object.entries(finalMenu).forEach(([categoryName, categoryItems]: [string, unknown[]]) => {
-      if (Array.isArray(categoryItems)) {
-        categoryItems.forEach((item: unknown) => {
-          const menuItem = item as Record<string, unknown>;
-          items.push({
-            id: itemId++,
-            category: categoryName.toLowerCase().replace(/\s+/g, '_'),
-            original: (menuItem.japanese_name as string) || (menuItem.name as string) || 'Unknown',
-            name: (menuItem.english_name as string) || (menuItem.translated_name as string) || 'Unknown Dish',
-            subtitle: (menuItem.category as string) || 'Traditional Japanese Dish',
-            description: (menuItem.description as string) || 'Delicious traditional Japanese dish prepared with care.',
-            ingredients: (menuItem.ingredients as string) || 'Traditional Japanese ingredients',
-            cookingMethod: (menuItem.cooking_method as string) || 'Traditional Japanese cooking method',
-            culturalNote: (menuItem.cultural_background as string) || 'Traditional Japanese cuisine',
-            price: parseInt((menuItem.price as string)?.replace(/[^\d]/g, '') || '500'),
-            image: getEmojiForCategory(categoryName),
-            allergens: (menuItem.allergens as string[]) || ['Please ask staff'],
-            tags: ['Traditional', (menuItem.category as string) || 'Japanese'].filter(Boolean),
-            spiceLevel: (menuItem.spice_level as number) || 0
-          });
-        });
-      }
-    });
-    
-    return items;
-  };
+  // convertToUberEatsFormat function removed as unused
 
   const getEmojiForCategory = (categoryName: string): string => {
     const lower = categoryName.toLowerCase();
@@ -452,143 +420,9 @@ const MenuTranslator = () => {
     return '🍽️';
   };
 
-  // UberEatsスタイルのカテゴリー生成
-  const generateCategories = (menuItems: MenuItem[]): Category[] => {
-    const categorySet = new Set(menuItems.map(item => item.category));
-    const categories = [
-      { id: 'all', name: 'All Menu', icon: '📋' },
-      ...Array.from(categorySet).map(cat => ({
-        id: cat,
-        name: cat.charAt(0).toUpperCase() + cat.slice(1).replace(/_/g, ' '),
-        icon: getEmojiForCategory(cat)
-      }))
-    ];
-    return categories;
-  };
+  // generateCategories function removed as unused
 
-  // UberEatsスタイルメニューコンポーネント (currently unused)
-  /*
-  const UberEatsStyleMenu = () => {
-    const menuItems = convertToUberEatsFormat((stageData as StageData)?.finalMenu || {});
-    const categories = generateCategories(menuItems);
-    
-    const filteredItems = selectedCategory === 'all' 
-      ? menuItems
-      : menuItems.filter(item => item.category === selectedCategory);
-
-    const MenuCard = ({ item }: { item: MenuItem }) => {
-      const truncatedDescription = item.description.length > 100 
-        ? item.description.substring(0, 100) + '...' 
-        : item.description;
-
-  return (
-        <div 
-          className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-4 hover:shadow-md transition-shadow cursor-pointer"
-          onClick={() => setSelectedItem(item)}
-        >
-          <div className="p-4">
-            <div className="flex justify-between items-start">
-              <div className="flex-1 pr-4">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <h3 className="text-lg font-semibold text-gray-900">{item.name}</h3>
-                      <span className="text-lg font-bold text-gray-900 ml-2">¥{item.price}</span>
-            </div>
-                    <p className="text-sm text-gray-500">{item.original} • {item.subtitle}</p>
-                  </div>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleFavorite(item.id);
-                    }}
-                    className="p-1 ml-2"
-                  >
-                    <Heart 
-                      size={20} 
-                      className={favorites.has(item.id) ? 'text-red-500 fill-current' : 'text-gray-400'} 
-                    />
-                  </button>
-                </div>
-                
-                <p className="text-sm text-gray-700 leading-relaxed mb-3">
-                  {truncatedDescription}
-                </p>
-
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-wrap gap-1">
-                    {item.tags.slice(0, 2).map((tag: string, index: number) => (
-                      <span key={index} className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded-full">
-                        {tag}
-                      </span>
-                    ))}
-                    {item.spiceLevel > 0 && (
-                      <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
-                        {'🌶️'.repeat(Math.min(item.spiceLevel, 3))}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="w-20 h-20 bg-gray-100 rounded-lg flex items-center justify-center text-3xl">
-                {item.image}
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    };
-
-    if (menuItems.length === 0) {
-      return (
-        <div className="text-center py-8">
-          <p className="text-gray-600">Menu analysis in progress...</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="max-w-md mx-auto bg-gray-50 min-h-screen">
-        {/* Header */}
-        <div className="bg-white shadow-sm p-4">
-          <div className="text-center">
-            <h1 className="text-xl font-bold text-gray-900">Japanese Restaurant Menu</h1>
-            <p className="text-sm text-gray-600">Analyzed & Translated by MenuSense</p>
-          </div>
-        </div>
-
-        {/* Categories */}
-        <div className="bg-white border-b border-gray-200">
-          <div className="flex overflow-x-auto p-4 space-x-4">
-            {categories.map((category) => (
-              <button
-                key={category.id}
-                onClick={() => setSelectedCategory(category.id)}
-                className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  selectedCategory === category.id
-                    ? 'bg-orange-500 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <span className="mr-2">{category.icon}</span>
-                {category.name}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Menu Items */}
-        <div className="p-4 space-y-4">
-          {filteredItems.map((item) => (
-            <MenuCard key={item.id} item={item} />
-          ))}
-        </div>
-
-        <div className="h-20"></div>
-      </div>
-    );
-  };
+  // UberEatsStyleMenu component removed as it was unused
 
   // 詳細モーダルコンポーネント
   const DetailModal = ({ item, onClose }: { item: MenuItem, onClose: () => void }) => (
@@ -868,7 +702,7 @@ const MenuTranslator = () => {
   const RealtimeMenuDisplay = () => {
     const [realtimeMenuItems, setRealtimeMenuItems] = useState<MenuItem[]>([]);
     const [realtimeCategories, setRealtimeCategories] = useState<Category[]>([]);
-    const [translationProgress, setTranslationProgress] = useState<{[key: string]: number}>({});
+    // translationProgress state removed as unused
     const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
     const [newItemAnimations, setNewItemAnimations] = useState<Set<number>>(new Set());
 
@@ -922,26 +756,7 @@ const MenuTranslator = () => {
           console.log('🚀 [RealtimeMenu] IMPORTANT UPDATE DETECTED - should trigger UI update!');
         }
 
-        // カテゴリー別翻訳進捗を計算
-        const categoryProgressMap: {[key: string]: number} = {};
-        Object.keys(categories).forEach(categoryName => {
-          const originalCount = categories[categoryName]?.length || 0;
-          const translatedCount = translatedCategories[categoryName]?.length || 0;
-          const finalCount = finalMenu[categoryName]?.length || 0;
-          
-          // Stage4のpartial_resultsやpartial_menuも考慮
-          const partialCount = partialResults[categoryName]?.length || partialMenu[categoryName]?.length || 0;
-          const effectiveFinalCount = Math.max(finalCount, partialCount);
-          
-          // Stage3の進捗: 翻訳完了率
-          const translationPercent = originalCount > 0 ? (translatedCount / originalCount) * 100 : 0;
-          // Stage4の進捗: 詳細説明完了率  
-          const detailPercent = originalCount > 0 ? (effectiveFinalCount / originalCount) * 100 : 0;
-          
-          // 現在のステージに応じた進捗を設定
-          categoryProgressMap[categoryName] = currentStage >= 4 ? detailPercent : translationPercent;
-        });
-        setTranslationProgress(categoryProgressMap);
+        // Category progress calculation removed as unused
 
         // Stage 2完了後: categoriesからメニューアイテムを生成（Stage3&4リアルタイム対応強化）
         if (Object.keys(categories).length > 0) {
@@ -1062,7 +877,7 @@ const MenuTranslator = () => {
                 completed: finalMenu[cat]?.length || 0,
                 partiallyCompleted: (partialResults[cat]?.length || 0) + (partialMenu[cat]?.length || 0),
                 isCurrentlyProcessing: currentProcessingCategory === cat,
-                progress: categoryProgressMap[cat] || 0,
+                progress: 0, // progress calculation removed
                 // リアルタイム反映のためのアイテム数
                 realtimeTranslated: categoryMenuItems.filter(item => item.isTranslated).length,
                 realtimeCompleted: categoryMenuItems.filter(item => item.isComplete).length,
@@ -1837,7 +1652,7 @@ const MenuTranslator = () => {
                   </h1>
                 </div>
                 <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  {currentStage === 1 ? "Reading your menu..." : "Understanding the dishes..."}
+                  {currentStage === 1 ? 'Reading your menu...' : 'Understanding the dishes...'}
                 </h2>
                 <p className="text-gray-600">
                   {currentStage === 1 
