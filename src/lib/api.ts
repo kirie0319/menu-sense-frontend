@@ -2,7 +2,7 @@ import axios from 'axios';
 import { TranslationResponse, ApiError, MenuItem } from '@/types';
 
 // バックエンドのベースURL（環境変数から取得、デフォルトはlocalhost:8000）
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Axiosインスタンスを作成
 const api = axios.create({

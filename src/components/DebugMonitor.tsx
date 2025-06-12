@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bug, Activity, Wifi, Clock, AlertTriangle, CheckCircle } from 'lucide-react';
+import { API_BASE_URL } from '@/lib/api';
 
 interface DebugLog {
   timestamp: string;
@@ -66,7 +67,7 @@ const DebugMonitor = ({ sessionId, isVisible, onToggle }: DebugMonitorProps) => 
 
     addLog('info', `Starting SSE monitoring for session: ${sessionId}`);
     
-    const eventSource = new EventSource(`http://localhost:8000/progress/${sessionId}`);
+    const eventSource = new EventSource(`${API_BASE_URL}/progress/${sessionId}`);
     const connectionStart = Date.now();
     
     setNetworkStatus(prev => ({
@@ -111,7 +112,7 @@ const DebugMonitor = ({ sessionId, isVisible, onToggle }: DebugMonitorProps) => 
           
           // Pongを送信 (非同期)
           if (sessionId) {
-            fetch(`http://localhost:8000/pong/${sessionId}`, { method: 'POST' })
+            fetch(`${API_BASE_URL}/pong/${sessionId}`, { method: 'POST' })
               .then(() => {
                 const pongTime = new Date().toLocaleTimeString();
                 setNetworkStatus(prev => ({
@@ -235,7 +236,7 @@ const DebugMonitor = ({ sessionId, isVisible, onToggle }: DebugMonitorProps) => 
     addLog('info', 'Testing backend connection...');
     
     try {
-      const response = await fetch('http://localhost:8000/health');
+      const response = await fetch(`${API_BASE_URL}/health`);
       if (response.ok) {
         const data = await response.json();
         addLog('success', 'Backend health check passed', undefined, data);

@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, Camera, AlertTriangle, CheckCircle, Zap, Brain, RefreshCw, Eye, Sparkles, Heart, ArrowLeft } from 'lucide-react';
 import { useTranslationStore } from '@/lib/store';
+import { API_BASE_URL } from '@/lib/api';
 import ServerStatus from './ServerStatus';
 import DebugMonitor from './DebugMonitor';
 
@@ -344,7 +345,7 @@ const MenuTranslator = () => {
     const formData = new FormData();
     formData.append('file', selectedFile);
 
-    const response = await fetch('http://localhost:8000/process-menu', {
+    const response = await fetch(`${API_BASE_URL}/process-menu`, {
       method: 'POST',
       body: formData,
     });
