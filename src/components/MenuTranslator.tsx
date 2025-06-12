@@ -2,11 +2,66 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Camera, AlertTriangle, CheckCircle, Zap, Brain, Clock, RefreshCw, Eye, Sparkles, Heart, ArrowLeft } from 'lucide-react';
+import { Upload, Camera, AlertTriangle, CheckCircle, Zap, Brain, RefreshCw, Eye, Sparkles, Heart, ArrowLeft } from 'lucide-react';
 import { useTranslationStore } from '@/lib/store';
 import ServerStatus from './ServerStatus';
-import ProgressStages from './ProgressStages';
 import DebugMonitor from './DebugMonitor';
+
+// Define proper types
+interface MenuItem {
+  id: number;
+  category: string;
+  categoryName?: string;
+  original: string;
+  name: string;
+  subtitle: string;
+  description: string;
+  ingredients: string;
+  cookingMethod: string;
+  culturalNote: string;
+  price: number;
+  image: string;
+  allergens: string[];
+  tags: string[];
+  spiceLevel: number;
+  isTranslated?: boolean;
+  isComplete?: boolean;
+  isPartiallyComplete?: boolean;
+  isCurrentlyProcessing?: boolean;
+  processingState?: string;
+  hasDescription?: boolean;
+  wasTranslated?: boolean;
+  rawData?: Record<string, unknown>;
+}
+
+interface Category {
+  id: string;
+  name: string;
+  icon: string;
+  count?: number;
+  translated?: number;
+  completed?: number;
+  partiallyCompleted?: number;
+  isCurrentlyProcessing?: boolean;
+  progress?: number;
+  realtimeTranslated?: number;
+  realtimeCompleted?: number;
+  realtimePartial?: number;
+}
+
+interface StageData {
+  categories?: Record<string, unknown[]>;
+  translatedCategories?: Record<string, unknown[]>;
+  finalMenu?: Record<string, unknown[]>;
+  partialResults?: Record<string, unknown[]>;
+  partialMenu?: Record<string, unknown[]>;
+  progress_percent?: number;
+  processing_category?: string;
+  elapsed_time?: number;
+  heartbeat?: boolean;
+  category_completed?: boolean;
+  category_progress?: number;
+}
 
 // Cursor風のタイプライター効果コンポーネント
 const TypewriterText = ({ text, speed = 50 }: { text: string; speed?: number }) => {
@@ -47,7 +102,7 @@ const MenuTranslator = () => {
   // UberEatsスタイルメニュー用の状態
   const [favorites, setFavorites] = useState(new Set<number>());
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -73,14 +128,14 @@ const MenuTranslator = () => {
       console.log('🔄 [MenuTranslator] stageData changed, forcing update:', {
         timestamp: new Date().toLocaleTimeString(),
         stageDataKeys: Object.keys(stageData),
-        categoriesCount: Object.keys(stageData.categories || {}).length,
-        translatedCount: Object.keys(stageData.translatedCategories || {}).length,
-        partialCount: Object.keys(stageData.partialResults || {}).length,
+        categoriesCount: Object.keys((stageData as StageData).categories || {}).length,
+        translatedCount: Object.keys((stageData as StageData).translatedCategories || {}).length,
+        partialCount: Object.keys((stageData as StageData).partialResults || {}).length,
         forceUpdateCounter
       });
       setForceUpdateCounter(prev => prev + 1);
     }
-  }, [stageData]);
+  }, [stageData, forceUpdateCounter]);
 
   // 翻訳が完了したときに分析画面を閉じる
   useEffect(() => {
@@ -133,7 +188,7 @@ const MenuTranslator = () => {
              // 進捗バーを現在のステージの進行状況に基づいて更新
        if (currentStage === 1) {
          // バックエンドから進捗パーセンテージが来ている場合はそれを使用
-         const backendProgress = stageData && (stageData as any).progress_percent;
+         const backendProgress = stageData && (stageData as StageData).progress_percent;
          if (backendProgress !== undefined && backendProgress > 0) {
            setStage1Progress(Math.min(100, backendProgress));
          } else {
@@ -142,7 +197,7 @@ const MenuTranslator = () => {
          }
        }
     }
-     }, [isAnalyzing, currentStage, isLoading, detectedItems.length, stageData]);
+     }, [isAnalyzing, currentStage, isLoading, detectedItems.length, stageData, stage1Items]);
 
   useEffect(() => {
     // Stage 2の進捗更新
@@ -159,7 +214,7 @@ const MenuTranslator = () => {
              // 進捗バーを現在のステージの進行状況に基づいて更新
        if (currentStage === 2) {
          // バックエンドから進捗パーセンテージが来ている場合はそれを使用
-         const backendProgress = stageData && (stageData as any).progress_percent;
+         const backendProgress = stageData && (stageData as StageData).progress_percent;
          if (backendProgress !== undefined && backendProgress > 0) {
            setStage2Progress(Math.min(100, backendProgress));
          } else {
@@ -168,7 +223,7 @@ const MenuTranslator = () => {
          }
        }
     }
-     }, [isAnalyzing, currentStage, isLoading, analysisItems.length, stageData]);
+     }, [isAnalyzing, currentStage, isLoading, analysisItems.length, stageData, stage2Items]);
 
   // ステージ完了時の進捗バー完了
   useEffect(() => {
@@ -186,29 +241,29 @@ const MenuTranslator = () => {
        // バックエンドからのリアルタイム進捗データをログ出力
        console.log(`[Frontend] Real-time progress data:`, {
          currentStage,
-         progress_percent: (stageData as any).progress_percent,
-         processing_category: (stageData as any).processing_category,
-         heartbeat: (stageData as any).heartbeat,
-         elapsed_time: (stageData as any).elapsed_time,
-         chunk_progress: (stageData as any).chunk_progress
+         progress_percent: (stageData as StageData).progress_percent,
+         processing_category: (stageData as StageData).processing_category,
+         heartbeat: (stageData as StageData).heartbeat,
+         elapsed_time: (stageData as StageData).elapsed_time,
+         chunk_progress: (stageData as Record<string, unknown>).chunk_progress
        });
 
        // Stage 3以降の進捗データがある場合
-       if (currentStage >= 3 && stageData.translatedCategories) {
-         const categories = stageData.categories as Record<string, unknown[]> || {};
-         const translatedCategories = stageData.translatedCategories as Record<string, unknown[]> || {};
+       if (currentStage >= 3 && (stageData as StageData).translatedCategories) {
+         const categories = (stageData as StageData).categories as Record<string, unknown[]> || {};
+         const translatedCategories = (stageData as StageData).translatedCategories as Record<string, unknown[]> || {};
          
          // 翻訳完了率を計算
          const totalCategories = Object.keys(categories).length;
          const translatedCount = Object.keys(translatedCategories).length;
-         const translationProgress = totalCategories > 0 ? (translatedCount / totalCategories) * 100 : 0;
+         const translationProgressPercent = totalCategories > 0 ? (translatedCount / totalCategories) * 100 : 0;
          
-         console.log(`[Frontend] Translation progress: ${translationProgress}% (${translatedCount}/${totalCategories})`);
+         console.log(`[Frontend] Translation progress: ${translationProgressPercent}% (${translatedCount}/${totalCategories})`);
        }
 
        // Stage 4の詳細な進捗データがある場合
-       if (currentStage >= 4 && stageData.finalMenu) {
-         const finalMenu = stageData.finalMenu as Record<string, unknown[]> || {};
+       if (currentStage >= 4 && (stageData as StageData).finalMenu) {
+         const finalMenu = (stageData as StageData).finalMenu as Record<string, unknown[]> || {};
          const totalItems = Object.values(finalMenu).reduce((acc, items) => acc + items.length, 0);
          
          console.log(`[Frontend] Final menu processing: ${totalItems} items processed`);
@@ -226,6 +281,12 @@ const MenuTranslator = () => {
     setIsDragOver(false);
   }, []);
 
+  const handleFileUpload = useCallback((file: File) => {
+    if (file && file.type.startsWith('image/')) {
+      setFile(file);
+    }
+  }, [setFile]);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
@@ -233,13 +294,7 @@ const MenuTranslator = () => {
     if (files.length > 0) {
       handleFileUpload(files[0]);
     }
-  }, []);
-
-  const handleFileUpload = (file: File) => {
-    if (file && file.type.startsWith('image/')) {
-      setFile(file);
-    }
-  };
+  }, [handleFileUpload]);
 
   const handleFileSelect = () => {
     fileInputRef.current?.click();
@@ -351,30 +406,31 @@ const MenuTranslator = () => {
   };
 
   // 実際のメニューデータからUberEatsスタイルの形式に変換
-  const convertToUberEatsFormat = (finalMenu: any) => {
+  const convertToUberEatsFormat = (finalMenu: Record<string, unknown[]>): MenuItem[] => {
     if (!finalMenu) return [];
     
-    const items: any[] = [];
+    const items: MenuItem[] = [];
     let itemId = 1;
     
-    Object.entries(finalMenu).forEach(([categoryName, categoryItems]: [string, any]) => {
+    Object.entries(finalMenu).forEach(([categoryName, categoryItems]: [string, unknown[]]) => {
       if (Array.isArray(categoryItems)) {
-        categoryItems.forEach((item: any) => {
+        categoryItems.forEach((item: unknown) => {
+          const menuItem = item as Record<string, unknown>;
           items.push({
             id: itemId++,
             category: categoryName.toLowerCase().replace(/\s+/g, '_'),
-            original: item.japanese_name || item.name || 'Unknown',
-            name: item.english_name || item.translated_name || 'Unknown Dish',
-            subtitle: item.category || 'Traditional Japanese Dish',
-            description: item.description || 'Delicious traditional Japanese dish prepared with care.',
-            ingredients: item.ingredients || 'Traditional Japanese ingredients',
-            cookingMethod: item.cooking_method || 'Traditional Japanese cooking method',
-            culturalNote: item.cultural_background || 'Traditional Japanese cuisine',
-            price: parseInt(item.price?.replace(/[^\d]/g, '') || '500'),
+            original: (menuItem.japanese_name as string) || (menuItem.name as string) || 'Unknown',
+            name: (menuItem.english_name as string) || (menuItem.translated_name as string) || 'Unknown Dish',
+            subtitle: (menuItem.category as string) || 'Traditional Japanese Dish',
+            description: (menuItem.description as string) || 'Delicious traditional Japanese dish prepared with care.',
+            ingredients: (menuItem.ingredients as string) || 'Traditional Japanese ingredients',
+            cookingMethod: (menuItem.cooking_method as string) || 'Traditional Japanese cooking method',
+            culturalNote: (menuItem.cultural_background as string) || 'Traditional Japanese cuisine',
+            price: parseInt((menuItem.price as string)?.replace(/[^\d]/g, '') || '500'),
             image: getEmojiForCategory(categoryName),
-            allergens: item.allergens || ['Please ask staff'],
-            tags: ['Traditional', item.category || 'Japanese'].filter(Boolean),
-            spiceLevel: item.spice_level || 0
+            allergens: (menuItem.allergens as string[]) || ['Please ask staff'],
+            tags: ['Traditional', (menuItem.category as string) || 'Japanese'].filter(Boolean),
+            spiceLevel: (menuItem.spice_level as number) || 0
           });
         });
       }
@@ -397,7 +453,7 @@ const MenuTranslator = () => {
   };
 
   // UberEatsスタイルのカテゴリー生成
-  const generateCategories = (menuItems: any[]) => {
+  const generateCategories = (menuItems: MenuItem[]): Category[] => {
     const categorySet = new Set(menuItems.map(item => item.category));
     const categories = [
       { id: 'all', name: 'All Menu', icon: '📋' },
@@ -410,16 +466,17 @@ const MenuTranslator = () => {
     return categories;
   };
 
-  // UberEatsスタイルメニューコンポーネント
+  // UberEatsスタイルメニューコンポーネント (currently unused)
+  /*
   const UberEatsStyleMenu = () => {
-    const menuItems = convertToUberEatsFormat(stageData.finalMenu);
+    const menuItems = convertToUberEatsFormat((stageData as StageData)?.finalMenu || {});
     const categories = generateCategories(menuItems);
     
     const filteredItems = selectedCategory === 'all' 
       ? menuItems
       : menuItems.filter(item => item.category === selectedCategory);
 
-    const MenuCard = ({ item }: { item: any }) => {
+    const MenuCard = ({ item }: { item: MenuItem }) => {
       const truncatedDescription = item.description.length > 100 
         ? item.description.substring(0, 100) + '...' 
         : item.description;
@@ -534,7 +591,7 @@ const MenuTranslator = () => {
   };
 
   // 詳細モーダルコンポーネント
-  const DetailModal = ({ item, onClose }: { item: any, onClose: () => void }) => (
+  const DetailModal = ({ item, onClose }: { item: MenuItem, onClose: () => void }) => (
     <div className="fixed inset-0 bg-white z-50">
       <div className="h-full overflow-y-auto">
         {/* Header - モバイル対応 */}
@@ -651,27 +708,30 @@ const MenuTranslator = () => {
   );
 
   // 翻訳結果用のUberEatsスタイルメニューコンポーネント
-  const UberEatsResultMenu = ({ result }: { result: any }) => {
+  const UberEatsResultMenu = ({ result }: { result: { menu_items: unknown[] } }) => {
     // TranslationResponse の menu_items を UberEats スタイルに変換
-    const convertResultToUberEatsFormat = (menuItems: any[]) => {
+    const convertResultToUberEatsFormat = (menuItems: unknown[]): MenuItem[] => {
       if (!menuItems || !Array.isArray(menuItems)) return [];
       
-      return menuItems.map((item, index) => ({
-        id: index + 1,
-        category: 'menu_item',
-        original: item.japanese_name || 'Unknown',
-        name: item.english_name || 'Unknown Dish',
-        subtitle: 'Traditional Japanese Dish',
-        description: item.description || 'Delicious traditional Japanese dish prepared with care.',
-        ingredients: item.ingredients || 'Traditional Japanese ingredients',
-        cookingMethod: item.cooking_method || 'Traditional Japanese cooking method',
-        culturalNote: item.cultural_background || 'Traditional Japanese cuisine',
-        price: parseInt(item.price?.replace(/[^\d]/g, '') || '500'),
-        image: getEmojiForDish(item.english_name || item.japanese_name || ''),
-        allergens: item.allergens || ['Please ask staff'],
-        tags: ['Traditional', 'Japanese'].filter(Boolean),
-        spiceLevel: item.spice_level || 0
-      }));
+      return menuItems.map((item, index) => {
+        const menuItem = item as Record<string, unknown>;
+        return ({
+          id: index + 1,
+          category: 'menu_item',
+          original: (menuItem.japanese_name as string) || 'Unknown',
+          name: (menuItem.english_name as string) || 'Unknown Dish',
+          subtitle: 'Traditional Japanese Dish',
+          description: (menuItem.description as string) || 'Delicious traditional Japanese dish prepared with care.',
+          ingredients: (menuItem.ingredients as string) || 'Traditional Japanese ingredients',
+          cookingMethod: (menuItem.cooking_method as string) || 'Traditional Japanese cooking method',
+          culturalNote: (menuItem.cultural_background as string) || 'Traditional Japanese cuisine',
+          price: parseInt((menuItem.price as string)?.replace(/[^\d]/g, '') || '500'),
+          image: getEmojiForDish((menuItem.english_name as string) || (menuItem.japanese_name as string) || ''),
+          allergens: (menuItem.allergens as string[]) || ['Please ask staff'],
+          tags: ['Traditional', 'Japanese'].filter(Boolean),
+          spiceLevel: (menuItem.spice_level as number) || 0
+        });
+      });
     };
 
     const getEmojiForDish = (dishName: string): string => {
@@ -695,7 +755,7 @@ const MenuTranslator = () => {
     const menuItems = convertResultToUberEatsFormat(result.menu_items);
     const categories = [{ id: 'all', name: 'All Menu', icon: '📋' }];
 
-    const MenuCard = ({ item }: { item: any }) => {
+    const MenuCard = ({ item }: { item: MenuItem }) => {
       const truncatedDescription = item.description.length > 100 
         ? item.description.substring(0, 100) + '...' 
         : item.description;
@@ -806,8 +866,8 @@ const MenuTranslator = () => {
 
   // Stage2完了後のリアルタイムメニュー表示コンポーネント（Stage3&4リアルタイム強化版）
   const RealtimeMenuDisplay = () => {
-    const [realtimeMenuItems, setRealtimeMenuItems] = useState<any[]>([]);
-    const [realtimeCategories, setRealtimeCategories] = useState<any[]>([]);
+    const [realtimeMenuItems, setRealtimeMenuItems] = useState<MenuItem[]>([]);
+    const [realtimeCategories, setRealtimeCategories] = useState<Category[]>([]);
     const [translationProgress, setTranslationProgress] = useState<{[key: string]: number}>({});
     const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
     const [newItemAnimations, setNewItemAnimations] = useState<Set<number>>(new Set());
@@ -815,21 +875,21 @@ const MenuTranslator = () => {
     // SSEからのstageDataを監視してリアルタイムでメニューを更新（Stage3&4リアルタイム強化 + 強制更新）
     useEffect(() => {
       if (stageData) {
-        const categories = stageData.categories as Record<string, unknown[]> || {};
-        const translatedCategories = stageData.translatedCategories as Record<string, unknown[]> || {};
-        const finalMenu = stageData.finalMenu as Record<string, unknown[]> || {};
+        const categories = (stageData as StageData).categories as Record<string, unknown[]> || {};
+        const translatedCategories = (stageData as StageData).translatedCategories as Record<string, unknown[]> || {};
+        const finalMenu = (stageData as StageData).finalMenu as Record<string, unknown[]> || {};
         
         // Stage4のpartial_resultsとpartial_menuを監視（リアルタイム反映）
-        const partialResults = (stageData.partialResults || (stageData as any).partial_results || {}) as Record<string, unknown[]>;
-        const partialMenu = (stageData.partialMenu || (stageData as any).partial_menu || {}) as Record<string, unknown[]>;
+        const partialResults = ((stageData as StageData).partialResults || (stageData as Record<string, unknown>).partial_results || {}) as Record<string, unknown[]>;
+        const partialMenu = ((stageData as StageData).partialMenu || (stageData as Record<string, unknown>).partial_menu || {}) as Record<string, unknown[]>;
 
         // Stage3の詳細進捗データを抽出
-        const currentProcessingCategory = (stageData as any).processing_category;
-        const globalProgressPercent = (stageData as any).progress_percent;
-        const elapsedTime = (stageData as any).elapsed_time;
-        const heartbeat = (stageData as any).heartbeat;
-        const categoryCompleted = (stageData as any).category_completed;
-        const categoryProgress = (stageData as any).category_progress;
+        const currentProcessingCategory = (stageData as Record<string, unknown>).processing_category as string;
+        const globalProgressPercent = (stageData as Record<string, unknown>).progress_percent as number;
+        const elapsedTime = (stageData as Record<string, unknown>).elapsed_time as number;
+        const heartbeat = (stageData as Record<string, unknown>).heartbeat as boolean;
+        const categoryCompleted = (stageData as Record<string, unknown>).category_completed as boolean;
+        const categoryProgress = (stageData as Record<string, unknown>).category_progress as number;
 
         // 🔍 詳細デバッグログ（リアルタイム反映確認用）
         const debugInfo = {
@@ -885,33 +945,38 @@ const MenuTranslator = () => {
 
         // Stage 2完了後: categoriesからメニューアイテムを生成（Stage3&4リアルタイム対応強化）
         if (Object.keys(categories).length > 0) {
-          const menuItems: any[] = [];
+          const menuItems: MenuItem[] = [];
           let itemId = 1;
 
-          Object.entries(categories).forEach(([categoryName, categoryItems]: [string, any]) => {
+          Object.entries(categories).forEach(([categoryName, categoryItems]: [string, unknown[]]) => {
             if (Array.isArray(categoryItems)) {
-              categoryItems.forEach((item: any) => {
-                const translatedItem = translatedCategories[categoryName]?.find((t: any) => 
-                  t.japanese_name === item.name || t.name === item.name
-                );
-                const finalItem = finalMenu[categoryName]?.find((f: any) => 
-                  f.japanese_name === item.name || f.name === item.name
-                );
+              categoryItems.forEach((item: unknown) => {
+                const itemData = item as Record<string, unknown>;
+                const translatedItem = translatedCategories[categoryName]?.find((t: unknown) => {
+                  const translatedData = t as Record<string, unknown>;
+                  return translatedData.japanese_name === itemData.name || translatedData.name === itemData.name;
+                });
+                const finalItem = finalMenu[categoryName]?.find((f: unknown) => {
+                  const finalData = f as Record<string, unknown>;
+                  return finalData.japanese_name === itemData.name || finalData.name === itemData.name;
+                });
                 
                 // Stage4のpartial_resultsやpartial_menuからもデータを取得（リアルタイム反映）
-                const partialItem = partialResults[categoryName]?.find((p: any) => 
-                  p.japanese_name === item.name || p.name === item.name
-                ) || partialMenu[categoryName]?.find((p: any) => 
-                  p.japanese_name === item.name || p.name === item.name
-                );
+                const partialItem = partialResults[categoryName]?.find((p: unknown) => {
+                  const partialData = p as Record<string, unknown>;
+                  return partialData.japanese_name === itemData.name || partialData.name === itemData.name;
+                }) || partialMenu[categoryName]?.find((p: unknown) => {
+                  const partialMenuData = p as Record<string, unknown>;
+                  return partialMenuData.japanese_name === itemData.name || partialMenuData.name === itemData.name;
+                });
 
                 // Stage3処理中の視覚的フィードバック
                 const isCurrentlyProcessing = currentProcessingCategory === categoryName;
                 
                 // 処理状況をより詳細に判定（partial dataも考慮）
                 let processingState = 'pending';
-                let isTranslated = !!translatedItem;
-                let isComplete = !!finalItem;
+                const isTranslated = !!translatedItem;
+                const isComplete = !!finalItem;
                 let isPartiallyComplete = !!partialItem;
                 
                 if (finalItem) {
@@ -1043,7 +1108,7 @@ const MenuTranslator = () => {
       ? realtimeMenuItems
       : realtimeMenuItems.filter(item => item.category === selectedCategory);
 
-    const RealtimeMenuCard = ({ item }: { item: any }) => {
+    const RealtimeMenuCard = ({ item }: { item: MenuItem }) => {
       const truncatedDescription = item.description.length > 100 
         ? item.description.substring(0, 100) + '...' 
         : item.description;
@@ -1222,10 +1287,10 @@ const MenuTranslator = () => {
                    <div className="text-left space-y-1">
                      <div>🔄 Update #{forceUpdateCounter} at {new Date(lastUpdateTime).toLocaleTimeString()}</div>
                      <div>📊 Items: {realtimeMenuItems.length} | 🌍 Translated: {realtimeMenuItems.filter(item => item.isTranslated).length} | 🔄 Partial: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length} | ✅ Complete: {realtimeMenuItems.filter(item => item.isComplete).length}</div>
-                     <div>📋 Raw Categories: {Object.keys(stageData.categories || {}).length}</div>
-                     <div>🌍 Translated Categories: {Object.keys(stageData.translatedCategories || {}).length}</div>
-                     <div>🔄 Partial Results: {Object.keys(stageData.partialResults || {}).length}</div>
-                     <div>📝 Partial Menu: {Object.keys(stageData.partialMenu || {}).length}</div>
+                     <div>📋 Raw Categories: {Object.keys((stageData as StageData).categories || {}).length}</div>
+                     <div>🌍 Translated Categories: {Object.keys((stageData as StageData).translatedCategories || {}).length}</div>
+                     <div>🔄 Partial Results: {Object.keys((stageData as StageData).partialResults || {}).length}</div>
+                     <div>📝 Partial Menu: {Object.keys((stageData as StageData).partialMenu || {}).length}</div>
                      {(stageData as any).processing_category && (
                        <div>⚡ Processing: {(stageData as any).processing_category}</div>
                      )}
@@ -1320,7 +1385,7 @@ const MenuTranslator = () => {
                      return 'bg-orange-500 text-white';
                    } else if (category.isCurrentlyProcessing) {
                      return 'bg-orange-100 text-orange-700 ring-2 ring-orange-200 animate-pulse';
-                   } else if (category.completed > 0 && category.completed === category.count) {
+                   } else if ((category.completed || 0) > 0 && (category.completed || 0) === (category.count || 0)) {
                      return 'bg-green-100 text-green-700 hover:bg-green-200';
                    } else if ((category.realtimeCompleted || category.completed || 0) > 0) {
                      return 'bg-green-100 text-green-700 hover:bg-green-200';
@@ -1542,7 +1607,7 @@ const MenuTranslator = () => {
           
           <p className="text-base sm:text-lg md:text-xl text-gray-600 mb-6 sm:mb-8 max-w-2xl mx-auto leading-relaxed px-4">
             <span className="hidden sm:inline">
-              Don't guess what you're ordering. Get instant, detailed explanations of every dish, 
+              Don&apos;t guess what you&apos;re ordering. Get instant, detailed explanations of every dish, 
               including ingredients, allergens, and spice levels—all in seconds.
             </span>
             <span className="sm:hidden">
@@ -1695,7 +1760,7 @@ const MenuTranslator = () => {
           {!selectedFile && !result && (
             <div className="mt-6 sm:mt-8 p-4 sm:p-6 bg-gradient-to-r from-orange-50 to-yellow-50 rounded-lg sm:rounded-xl border border-orange-200">
               <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4 text-center">
-                ✨ Here's what you'll get instantly:
+                ✨ Here&apos;s what you&apos;ll get instantly:
               </h3>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">

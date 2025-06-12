@@ -420,7 +420,7 @@ const DebugMonitor = ({ sessionId, isVisible, onToggle }: DebugMonitorProps) => 
                   }`}>
                     {log.message}
                   </div>
-                  {log.data && (
+                  {log.data != null && (
                     <div className="mt-1 text-xs text-gray-500">
                       <span className="font-medium">Data:</span> {typeof log.data === 'object' 
                         ? `${Object.keys(log.data as Record<string, unknown>).length} properties` 
