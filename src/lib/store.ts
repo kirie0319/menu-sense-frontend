@@ -184,14 +184,14 @@ export const useTranslationStore = create<TranslationStore>((set, get) => ({
               }
               
               // リアルタイム部分結果の反映
-              if (partialResults) {
+                if (partialResults) {
                 console.log(`[Store] 🔄 Setting Stage 4 partial results: ${Object.keys(partialResults as Record<string, unknown>).length} categories`);
                 newStageData.partialResults = partialResults as Record<string, unknown[]>;
-              }
-              if (partialMenu) {
+                }
+                if (partialMenu) {
                 console.log(`[Store] 🔄 Setting Stage 4 partial menu: ${Object.keys(partialMenu as Record<string, unknown>).length} categories`);
                 newStageData.partialMenu = partialMenu as Record<string, unknown[]>;
-              }
+                }
             }
             
             // その他のstageDataもコピー（streaming_update, newly_processed_itemsなど）
@@ -203,7 +203,7 @@ export const useTranslationStore = create<TranslationStore>((set, get) => ({
             
             // その他のデータを直接stageDataに含める（リアルタイム情報用）
             newStageData = { ...newStageData, ...otherData };
-          }
+              }
           
           // 全ての更新を1回で実行（無限ループ防止）
           set({ 
@@ -219,20 +219,79 @@ export const useTranslationStore = create<TranslationStore>((set, get) => ({
       set({ result, isLoading: false });
     } catch (error) {
       const totalTime = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : 'Translation failed';
+      
+      // エラーの詳細情報を収集
+      let errorDetails: Record<string, unknown> = {};
+      let errorMessage = 'Translation failed';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        errorDetails = {
+          name: error.name,
+          message: error.message,
+          stack: error.stack?.substring(0, 500), // スタックトレースの一部
+          constructor: error.constructor.name
+        };
+      } else if (typeof error === 'object' && error !== null) {
+        // オブジェクトエラーの場合
+        errorDetails = {
+          type: 'object',
+          keys: Object.keys(error),
+          stringified: JSON.stringify(error),
+          value: error
+        };
+        errorMessage = JSON.stringify(error);
+      } else {
+        // プリミティブ値の場合
+        errorDetails = {
+          type: typeof error,
+          value: error,
+          stringified: String(error)
+        };
+        errorMessage = String(error);
+      }
+      
+      // 現在の状態情報も含める
+      const currentState = get();
+      const debugInfo = {
+        totalTime,
+        currentStage: currentState.currentStage,
+        hasStageData: Object.keys(currentState.stageData).length > 0,
+        stageDataKeys: Object.keys(currentState.stageData),
+        selectedFile: currentState.selectedFile ? {
+          name: currentState.selectedFile.name,
+          size: currentState.selectedFile.size,
+          type: currentState.selectedFile.type
+        } : null,
+        apiBaseUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+        timestamp: new Date().toISOString()
+      };
       
       console.error(`[Store] ❌ Translation failed after ${totalTime}ms:`, {
-        error: errorMessage,
-        errorType: error instanceof Error ? error.constructor.name : typeof error,
-        currentStage: get().currentStage
+        error: errorDetails,
+        errorMessage,
+        debugInfo
       });
       
-      set({ error: errorMessage, isLoading: false });
+      // より具体的なエラーメッセージを生成
+      let userFriendlyMessage = errorMessage;
+      
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
+        userFriendlyMessage = `Network connection failed. Please check:\n• Backend server is running\n• Internet connection is stable\n• CORS configuration is correct`;
+      } else if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
+        userFriendlyMessage = `Request timed out after ${Math.round(totalTime/1000)}s. The image might be too complex or the server is busy.`;
+      } else if (errorMessage.includes('Stage 1') || errorMessage.includes('OCR')) {
+        userFriendlyMessage = `Image processing failed. Please try:\n• Using a clearer image\n• Ensuring the image contains text\n• Checking that the image is not too large`;
+      } else if (currentState.currentStage === 0) {
+        userFriendlyMessage = `Failed to start translation. Please check:\n• Backend server is running on ${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}\n• Network connection\n• Selected image is valid`;
+      }
+      
+      set({ error: userFriendlyMessage, isLoading: false });
       
       // エラー時は現在のステージをエラー状態に
       const { currentStage } = get();
       if (currentStage > 0) {
-        get().setProgressStage(currentStage, 'error', errorMessage);
+        get().setProgressStage(currentStage, 'error', userFriendlyMessage);
       }
     }
   },

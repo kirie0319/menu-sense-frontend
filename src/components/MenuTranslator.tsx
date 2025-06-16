@@ -132,13 +132,13 @@ const MenuTranslator = () => {
       if (currentDataString !== lastStageDataRef.current) {
         lastStageDataRef.current = currentDataString;
         console.log('🔄 [MenuTranslator] stageData changed:', {
-          timestamp: new Date().toLocaleTimeString(),
-          stageDataKeys: Object.keys(stageData),
-          categoriesCount: Object.keys((stageData as StageData).categories || {}).length,
-          translatedCount: Object.keys((stageData as StageData).translatedCategories || {}).length,
+        timestamp: new Date().toLocaleTimeString(),
+        stageDataKeys: Object.keys(stageData),
+        categoriesCount: Object.keys((stageData as StageData).categories || {}).length,
+        translatedCount: Object.keys((stageData as StageData).translatedCategories || {}).length,
           partialCount: Object.keys((stageData as StageData).partialResults || {}).length
-        });
-      }
+      });
+    }
     }
   }, [stageData]); // 依存配列を最小限に
 
@@ -1214,26 +1214,26 @@ const MenuTranslator = () => {
                      </div>
                    ) : (
                      <>
-                       <p className="text-xs sm:text-sm text-gray-600">
-                         {realtimeMenuItems.filter(item => item.isTranslated).length} of {realtimeMenuItems.length} items translated
+                   <p className="text-xs sm:text-sm text-gray-600">
+                     {realtimeMenuItems.filter(item => item.isTranslated).length} of {realtimeMenuItems.length} items translated
+                   </p>
+                   {stageData && (stageData as any).processing_category && (
+                     <div className="flex items-center justify-center space-x-2">
+                       <span className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span>
+                       <p className="text-xs text-orange-600 font-medium">
+                         Translating: {(stageData as any).processing_category}
                        </p>
-                       {stageData && (stageData as any).processing_category && (
-                         <div className="flex items-center justify-center space-x-2">
-                           <span className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span>
-                           <p className="text-xs text-orange-600 font-medium">
-                             Translating: {(stageData as any).processing_category}
-                           </p>
-                         </div>
-                       )}
-                       {stageData && (stageData as any).progress_percent && (
-                         <p className="text-xs text-blue-600">
-                           {Math.round((stageData as any).progress_percent)}% complete
-                         </p>
-                       )}
-                       {stageData && (stageData as any).elapsed_time && (
-                         <p className="text-xs text-gray-500">
-                           Elapsed: {Math.round((stageData as any).elapsed_time / 1000)}s
-                         </p>
+                     </div>
+                   )}
+                   {stageData && (stageData as any).progress_percent && (
+                     <p className="text-xs text-blue-600">
+                       {Math.round((stageData as any).progress_percent)}% complete
+                     </p>
+                   )}
+                   {stageData && (stageData as any).elapsed_time && (
+                     <p className="text-xs text-gray-500">
+                       Elapsed: {Math.round((stageData as any).elapsed_time / 1000)}s
+                     </p>
                        )}
                      </>
                    )}

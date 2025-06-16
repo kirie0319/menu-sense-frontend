@@ -118,7 +118,7 @@ export class MenuTranslationApi {
       console.log(`[API] 🆔 Session started with ID: ${sessionId}`);
 
       // Server-Sent Eventsで進捗を監視
-      const result = await this.monitorProgress(sessionId, onProgress, abortController);
+      const result = await this.monitorProgress(sessionId, onProgress, abortController, startTime);
       
       const totalDuration = Date.now() - startTime;
       console.log(`[API] ✅ Progress translation completed in ${totalDuration}ms`);
@@ -169,7 +169,8 @@ export class MenuTranslationApi {
   private static async monitorProgress(
     sessionId: string,
     onProgress: (stage: number, status: string, message: string, data?: unknown) => void,
-    abortController: AbortController
+    abortController: AbortController,
+    startTime: number
   ): Promise<TranslationResponse> {
     return new Promise((resolve, reject) => {
       const eventSource = new EventSource(`${API_BASE_URL}/progress/${sessionId}`);
@@ -442,6 +443,21 @@ export class MenuTranslationApi {
 
       eventSource.onerror = (error) => {
         console.error('❌ SSE connection error:', error);
+        
+        // エラーの詳細情報を収集
+        const errorDetails = {
+          type: 'SSE_CONNECTION_ERROR',
+          readyState: eventSource.readyState,
+          url: eventSource.url,
+          currentStage,
+          elapsedTime: Date.now() - startTime,
+          lastHeartbeat: new Date(lastHeartbeat).toISOString(),
+          stage4PartialResults: Object.keys(stage4PartialResults).length,
+          error: error
+        };
+        
+        console.error('❌ SSE Error Details:', errorDetails);
+        
         clearInterval(heartbeatInterval);
         eventSource.close();
         
@@ -466,10 +482,21 @@ export class MenuTranslationApi {
             finalResult.menu_items = menuItems;
             resolve(finalResult);
           } else {
-            reject(new Error('Connection error during Stage 4. Partial results recovered but translation incomplete.'));
+            reject(new Error(`SSE connection error during Stage 4. Partial results recovered but translation incomplete. Error details: ${JSON.stringify(errorDetails)}`));
           }
         } else {
-          reject(new Error(`Connection error occurred during Stage ${currentStage}`));
+          // 接続エラーの具体的な原因を特定
+          let errorMessage = `SSE connection error occurred during Stage ${currentStage}`;
+          
+          if (eventSource.readyState === EventSource.CLOSED) {
+            errorMessage += ' (Connection closed by server)';
+          } else if (eventSource.readyState === EventSource.CONNECTING) {
+            errorMessage += ' (Connection failed to establish)';
+          }
+          
+          errorMessage += `. Please check:\n• Backend server is running\n• Network connection is stable\n• CORS configuration allows SSE`;
+          
+          reject(new Error(errorMessage));
         }
       };
     });
