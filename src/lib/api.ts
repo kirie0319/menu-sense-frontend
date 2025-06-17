@@ -1,8 +1,10 @@
 import axios from 'axios';
-import { TranslationResponse, ApiError, MenuItem } from '@/types';
+import { TranslationResponse, ApiError, ApiMenuItem } from '@/types';
 
-// バックエンドのベースURL（環境変数から取得、デフォルトはlocalhost:8000）
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// バックエンドのベースURL（環境変数から取得、バージョン含む）
+const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const apiVersion = process.env.NEXT_PUBLIC_API_VERSION || 'v1';
+export const API_BASE_URL = `${baseUrl}/${apiVersion}`;
 
 // Axiosインスタンスを作成
 const api = axios.create({
@@ -103,10 +105,10 @@ export class MenuTranslationApi {
       const formData = new FormData();
       formData.append('file', file);
 
-      console.log(`[API] 📤 Uploading file to /process-menu`);
+      console.log(`[API] 📤 Uploading file to /process`);
       
       // セッション開始
-      const startResponse = await api.post('/process-menu', formData, {
+      const startResponse = await api.post('/process', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -205,7 +207,7 @@ export class MenuTranslationApi {
             console.warn('⚠️ Stage 4 timeout detected, but partial results available');
             
             // 部分結果で最終レスポンスを構築
-            const menuItems: MenuItem[] = [];
+            const menuItems: ApiMenuItem[] = [];
             for (const items of Object.values(stage4PartialResults)) {
               const itemArray = items as Record<string, string>[];
               for (const item of itemArray) {
@@ -350,7 +352,7 @@ export class MenuTranslationApi {
             }
             
             // final_menuを menu_items 形式に変換
-            const menuItems: MenuItem[] = [];
+            const menuItems: ApiMenuItem[] = [];
             for (const items of Object.values(data.final_menu)) {
               const itemArray = items as Record<string, string>[];
               for (const item of itemArray) {
@@ -376,7 +378,7 @@ export class MenuTranslationApi {
             } else if (Object.keys(stage4PartialResults).length > 0) {
               // 部分結果がある場合はそれを使用
               console.warn('⚠️ Using partial Stage 4 results as final result');
-              const menuItems: MenuItem[] = [];
+              const menuItems: ApiMenuItem[] = [];
               for (const items of Object.values(stage4PartialResults)) {
                 const itemArray = items as Record<string, string>[];
                 for (const item of itemArray) {
@@ -407,7 +409,7 @@ export class MenuTranslationApi {
             if (stage === 4 && Object.keys(stage4PartialResults).length > 0) {
               console.warn('⚠️ Stage 4 error detected, but partial results available');
               
-              const menuItems: MenuItem[] = [];
+              const menuItems: ApiMenuItem[] = [];
               for (const items of Object.values(stage4PartialResults)) {
                 const itemArray = items as Record<string, string>[];
                 for (const item of itemArray) {
@@ -465,7 +467,7 @@ export class MenuTranslationApi {
         if (currentStage === 4 && Object.keys(stage4PartialResults).length > 0) {
           console.warn('⚠️ Connection error during Stage 4, attempting recovery with partial results');
           
-          const menuItems: MenuItem[] = [];
+          const menuItems: ApiMenuItem[] = [];
           for (const items of Object.values(stage4PartialResults)) {
             const itemArray = items as Record<string, string>[];
             for (const item of itemArray) {

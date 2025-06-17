@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { TranslationState } from '@/types';
-import { MenuTranslationApi } from './api';
+import { MenuTranslationApi, API_BASE_URL } from './api';
 
 interface ProgressStage {
   stage: number;
@@ -263,7 +263,7 @@ export const useTranslationStore = create<TranslationStore>((set, get) => ({
           size: currentState.selectedFile.size,
           type: currentState.selectedFile.type
         } : null,
-        apiBaseUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+        apiBaseUrl: API_BASE_URL,
         timestamp: new Date().toISOString()
       };
       
@@ -283,7 +283,7 @@ export const useTranslationStore = create<TranslationStore>((set, get) => ({
       } else if (errorMessage.includes('Stage 1') || errorMessage.includes('OCR')) {
         userFriendlyMessage = `Image processing failed. Please try:\n• Using a clearer image\n• Ensuring the image contains text\n• Checking that the image is not too large`;
       } else if (currentState.currentStage === 0) {
-        userFriendlyMessage = `Failed to start translation. Please check:\n• Backend server is running on ${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}\n• Network connection\n• Selected image is valid`;
+        userFriendlyMessage = `Failed to start translation. Please check:\n• Backend server is running on ${API_BASE_URL}\n• Network connection\n• Selected image is valid`;
       }
       
       set({ error: userFriendlyMessage, isLoading: false });

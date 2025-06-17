@@ -5,102 +5,26 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, Camera, AlertTriangle, CheckCircle, Zap, Brain, RefreshCw, Eye, Sparkles, Heart, ArrowLeft } from 'lucide-react';
 import { useTranslationStore } from '@/lib/store';
 import { API_BASE_URL } from '@/lib/api';
+import { useMenuTranslationProgress } from '@/hooks/useMenuTranslationProgress';
 import ServerStatus from './ServerStatus';
 import DebugMonitor from './DebugMonitor';
+import MenuCategoryList from './MenuCategoryList';
+import MenuItemCard from './MenuItemCard';
+import TranslationStatus from './TranslationStatus';
+import { Category, MenuItem, StageData } from '@/types';
 
 // Define proper types
-interface MenuItem {
-  id: number;
-  category: string;
-  categoryName?: string;
-  original: string;
-  name: string;
-  subtitle: string;
-  description: string;
-  ingredients: string;
-  cookingMethod: string;
-  culturalNote: string;
-  price: number;
-  image: string;
-  allergens: string[];
-  tags: string[];
-  spiceLevel: number;
-  isTranslated?: boolean;
-  isComplete?: boolean;
-  isPartiallyComplete?: boolean;
-  isCurrentlyProcessing?: boolean;
-  processingState?: string;
-  hasDescription?: boolean;
-  wasTranslated?: boolean;
-  rawData?: Record<string, unknown>;
-}
+// MenuItem interface moved to MenuItemCard.tsx
 
-interface Category {
-  id: string;
-  name: string;
-  icon: string;
-  count?: number;
-  translated?: number;
-  completed?: number;
-  partiallyCompleted?: number;
-  isCurrentlyProcessing?: boolean;
-  progress?: number;
-  realtimeTranslated?: number;
-  realtimeCompleted?: number;
-  realtimePartial?: number;
-}
+// Category interface moved to MenuCategoryList.tsx
+// StageData interface moved to TranslationStatus.tsx
 
-interface StageData {
-  categories?: Record<string, unknown[]>;
-  translatedCategories?: Record<string, unknown[]>;
-  finalMenu?: Record<string, unknown[]>;
-  partialResults?: Record<string, unknown[]>;
-  partialMenu?: Record<string, unknown[]>;
-  progress_percent?: number;
-  processing_category?: string;
-  elapsed_time?: number;
-  heartbeat?: boolean;
-  category_completed?: boolean;
-  category_progress?: number;
-}
-
-// Cursor風のタイプライター効果コンポーネント
-const TypewriterText = ({ text, speed = 50 }: { text: string; speed?: number }) => {
-  const [displayText, setDisplayText] = useState('');
-  const [currentIndex, setCurrentIndex] = useState(0);
-
-  useEffect(() => {
-    if (currentIndex < text.length) {
-      const timeout = setTimeout(() => {
-        setDisplayText(prev => prev + text[currentIndex]);
-        setCurrentIndex(prev => prev + 1);
-      }, speed);
-
-      return () => clearTimeout(timeout);
-    }
-  }, [currentIndex, text, speed]);
-
-  useEffect(() => {
-    // テキストが変わったらリセット
-    setDisplayText('');
-    setCurrentIndex(0);
-  }, [text]);
-
-  return <span>{displayText}</span>;
-};
+// TypewriterText component moved to MenuItemCard.tsx
 
 const MenuTranslator = () => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isServerHealthy, setIsServerHealthy] = useState(false);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
-  const [stage3Completed, setStage3Completed] = useState(false);
-  const [translatedMenuVisible, setTranslatedMenuVisible] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(undefined);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [stage1Progress, setStage1Progress] = useState(0);
-  const [stage2Progress, setStage2Progress] = useState(0);
-  const [detectedItems, setDetectedItems] = useState<Array<{text: string, delay: number}>>([]);
-  const [analysisItems, setAnalysisItems] = useState<Array<{text: string, delay: number}>>([]);
   
   // UberEatsスタイルメニュー用の状態
   const [favorites, setFavorites] = useState(new Set<number>());
@@ -122,6 +46,23 @@ const MenuTranslator = () => {
     setFile 
   } = useTranslationStore();
 
+  // 進捗関連の状態とアクションをカスタムフックから取得
+  const {
+    isAnalyzing,
+    stage1Progress,
+    stage2Progress,
+    detectedItems,
+    analysisItems,
+    stage3Completed,
+    translatedMenuVisible,
+    currentSessionId,
+    startAnalysis,
+    cancelAnalysis,
+    resetProgress,
+    setStage3Completed,
+    setTranslatedMenuVisible,
+  } = useMenuTranslationProgress();
+
   // stageDataの変更を監視（デバッグ用・無限ループ修正版）
   const lastStageDataRef = useRef<string>('');
   
@@ -141,149 +82,6 @@ const MenuTranslator = () => {
     }
     }
   }, [stageData]); // 依存配列を最小限に
-
-  // 翻訳が完了したときに分析画面を閉じる
-  useEffect(() => {
-    if (result && isAnalyzing) {
-      setIsAnalyzing(false);
-    }
-  }, [result, isAnalyzing]);
-
-  // エラーが発生したときに分析画面を閉じる
-  useEffect(() => {
-    if (error && isAnalyzing) {
-      setIsAnalyzing(false);
-    }
-  }, [error, isAnalyzing]);
-
-  // Stage3完了時の翻訳メニュー表示制御
-  useEffect(() => {
-    if (stageData && (stageData as any).show_translated_menu && currentStage === 3) {
-      setStage3Completed(true);
-      setTranslatedMenuVisible(true);
-      console.log('🌍 Stage3 completed! Showing translated menu');
-    }
-  }, [stageData, currentStage]);
-
-  // Stage 1とStage 2のアイテムデータ
-  const stage1Items = [
-    { text: "Scanning menu image...", delay: 500 },
-    { text: "Detecting Japanese text...", delay: 1200 },
-    { text: "Found: 焼き鳥", delay: 1800 },
-    { text: "Found: 麻婆豆腐", delay: 2200 },
-    { text: "Found: 海老フライ", delay: 2600 },
-    { text: "Extracting prices...", delay: 3000 },
-    { text: "OCR complete ✓", delay: 3400 }
-  ];
-
-  const stage2Items = [
-    { text: "Initializing AI translator...", delay: 500 },
-    { text: "Analyzing dish contexts...", delay: 1000 },
-    { text: "Identifying ingredients...", delay: 1500 },
-    { text: "Detecting allergens...", delay: 2000 },
-    { text: "Calculating spice levels...", delay: 2500 },
-    { text: "Adding cultural context...", delay: 3000 },
-    { text: "Finalizing translations...", delay: 3500 }
-  ];
-
-  // バックエンドの進捗データからフロントエンドの進捗を更新
-  useEffect(() => {
-    // Stage 1の進捗更新
-    if (isAnalyzing && currentStage === 1 && isLoading) {
-      // Stage 1アイテムを段階的に追加（実際のOCR検出に基づく）
-      const currentDetectedCount = detectedItems.length;
-      if (currentDetectedCount < stage1Items.length) {
-        const nextItem = stage1Items[currentDetectedCount];
-        setTimeout(() => {
-          setDetectedItems(prev => [...prev, nextItem]);
-        }, 500);
-      }
-
-             // 進捗バーを現在のステージの進行状況に基づいて更新
-       if (currentStage === 1) {
-         // バックエンドから進捗パーセンテージが来ている場合はそれを使用
-         const backendProgress = stageData && (stageData as StageData).progress_percent;
-         if (backendProgress !== undefined && backendProgress > 0) {
-           setStage1Progress(Math.min(100, backendProgress));
-         } else {
-           // フォールバック: 検出されたアイテム数に基づく
-           setStage1Progress(Math.min(85, (detectedItems.length / stage1Items.length) * 100));
-         }
-       }
-    }
-     }, [isAnalyzing, currentStage, isLoading, detectedItems.length, stageData, stage1Items]);
-
-  useEffect(() => {
-    // Stage 2の進捗更新
-    if (isAnalyzing && currentStage === 2 && isLoading) {
-      // Stage 2アイテムを段階的に追加
-      const currentAnalysisCount = analysisItems.length;
-      if (currentAnalysisCount < stage2Items.length) {
-        const nextItem = stage2Items[currentAnalysisCount];
-        setTimeout(() => {
-          setAnalysisItems(prev => [...prev, nextItem]);
-        }, 700);
-      }
-
-             // 進捗バーを現在のステージの進行状況に基づいて更新
-       if (currentStage === 2) {
-         // バックエンドから進捗パーセンテージが来ている場合はそれを使用
-         const backendProgress = stageData && (stageData as StageData).progress_percent;
-         if (backendProgress !== undefined && backendProgress > 0) {
-           setStage2Progress(Math.min(100, backendProgress));
-         } else {
-           // フォールバック: 分析アイテム数に基づく
-           setStage2Progress(Math.min(85, (analysisItems.length / stage2Items.length) * 100));
-         }
-       }
-    }
-     }, [isAnalyzing, currentStage, isLoading, analysisItems.length, stageData, stage2Items]);
-
-  // ステージ完了時の進捗バー完了
-  useEffect(() => {
-    if (currentStage > 1) {
-      setStage1Progress(100);
-    }
-    if (currentStage > 2) {
-      setStage2Progress(100);
-    }
-  }, [currentStage]);
-
-     // バックエンドからの詳細進捗データを活用
-   useEffect(() => {
-     if (stageData && isAnalyzing && isLoading) {
-       // バックエンドからのリアルタイム進捗データをログ出力
-       console.log(`[Frontend] Real-time progress data:`, {
-         currentStage,
-         progress_percent: (stageData as StageData).progress_percent,
-         processing_category: (stageData as StageData).processing_category,
-         heartbeat: (stageData as StageData).heartbeat,
-         elapsed_time: (stageData as StageData).elapsed_time,
-         chunk_progress: (stageData as Record<string, unknown>).chunk_progress
-       });
-
-       // Stage 3以降の進捗データがある場合
-       if (currentStage >= 3 && (stageData as StageData).translatedCategories) {
-         const categories = (stageData as StageData).categories as Record<string, unknown[]> || {};
-         const translatedCategories = (stageData as StageData).translatedCategories as Record<string, unknown[]> || {};
-         
-         // 翻訳完了率を計算
-         const totalCategories = Object.keys(categories).length;
-         const translatedCount = Object.keys(translatedCategories).length;
-         const translationProgressPercent = totalCategories > 0 ? (translatedCount / totalCategories) * 100 : 0;
-         
-         console.log(`[Frontend] Translation progress: ${translationProgressPercent}% (${translatedCount}/${totalCategories})`);
-       }
-
-       // Stage 4の詳細な進捗データがある場合
-       if (currentStage >= 4 && (stageData as StageData).finalMenu) {
-         const finalMenu = (stageData as StageData).finalMenu as Record<string, unknown[]> || {};
-         const totalItems = Object.values(finalMenu).reduce((acc, items) => acc + items.length, 0);
-         
-         console.log(`[Frontend] Final menu processing: ${totalItems} items processed`);
-       }
-     }
-   }, [stageData, currentStage, isAnalyzing, isLoading]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -324,74 +122,18 @@ const MenuTranslator = () => {
   const handleTranslate = async () => {
     if (!selectedFile) return;
     
-    // 分析画面に遷移
-    setIsAnalyzing(true);
-    
-    // 進捗をリセット
-    setStage1Progress(0);
-    setStage2Progress(0);
-    setDetectedItems([]);
-    setAnalysisItems([]);
-    
     // UberEatsスタイルメニューをリセット
     setFavorites(new Set<number>());
     setSelectedCategory('all');
     setSelectedItem(null);
     
-    // セッションIDをクリア
-    setCurrentSessionId(undefined);
-    
-    // リアルタイム進捗モードでセッションIDを取得
-    try {
-      const sessionId = await startProgressTranslation();
-      setCurrentSessionId(sessionId);
-    } catch (error) {
-      console.error('Failed to start progress translation:', error);
-      setIsAnalyzing(false); // エラー時は分析画面から戻る
-    }
-  };
-
-  // リアルタイム進捗翻訳の開始（セッションID取得用）
-  const startProgressTranslation = async (): Promise<string> => {
-    if (!selectedFile) throw new Error('No file selected');
-    
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-
-    const response = await fetch(`${API_BASE_URL}/process-menu`, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to start processing: ${response.status}`);
-    }
-
-    const data = await response.json();
-    console.log('🆔 Session ID obtained:', data.session_id);
-    
-    // 通常の進捗付き翻訳を実行
-    await translateMenu();
-    
-    return data.session_id;
+    // カスタムフックの分析開始を使用
+    await startAnalysis();
   };
 
   const handleTryAgain = () => {
-    clearResult();
-    clearError();
-    setFile(null);
-    setIsAnalyzing(false); // 分析画面から戻る
-    setCurrentSessionId(undefined);
-    
-    // Stage3&4関連の状態もリセット
-    setStage3Completed(false);
-    setTranslatedMenuVisible(false);
-    
-    // 進捗をリセット
-    setStage1Progress(0);
-    setStage2Progress(0);
-    setDetectedItems([]);
-    setAnalysisItems([]);
+    // カスタムフックのリセット機能を使用
+    resetProgress();
     
     // UberEatsスタイルメニューをリセット
     setFavorites(new Set<number>());
@@ -399,20 +141,7 @@ const MenuTranslator = () => {
     setSelectedItem(null);
   };
 
-  // ローディングスピナーコンポーネント
-  const LoadingSpinner = ({ color = "orange" }: { color?: string }) => (
-    <div className={`animate-spin rounded-full h-8 w-8 border-b-2 border-${color}-500`}></div>
-  );
-
-  // プログレスバーコンポーネント
-  const ProgressBar = ({ progress, color = "orange" }: { progress: number, color?: string }) => (
-    <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-      <div 
-        className={`h-2 bg-gradient-to-r from-${color}-500 to-red-500 rounded-full transition-all duration-300 ease-out`}
-        style={{ width: `${progress}%` }}
-      ></div>
-    </div>
-  );
+  // LoadingSpinner and ProgressBar components moved to TranslationStatus.tsx
 
   // UberEatsスタイル機能
   const toggleFavorite = (itemId: number) => {
@@ -993,154 +722,7 @@ const MenuTranslator = () => {
       ? realtimeMenuItems
       : realtimeMenuItems.filter(item => item.category === selectedCategory);
 
-    const RealtimeMenuCard = ({ item }: { item: MenuItem }) => {
-      const truncatedDescription = item.description.length > 100 
-        ? item.description.substring(0, 100) + '...' 
-        : item.description;
-
-      // Stage3&4リアルタイム処理状況の視覚的フィードバック（強化版）
-      const getStatusIndicator = () => {
-        if (item.isComplete) {
-          return <span className="ml-2 w-2 h-2 bg-green-500 rounded-full flex-shrink-0" title="Complete with details"></span>;
-        } else if (item.isPartiallyComplete) {
-          return (
-            <div className="ml-2 flex items-center flex-shrink-0">
-              <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-              <span className="ml-1 text-xs text-blue-600 font-medium">Adding details...</span>
-            </div>
-          );
-        } else if (item.isTranslated) {
-          return <span className="ml-2 w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" title="Translated"></span>;
-        } else if (item.isCurrentlyProcessing) {
-          return (
-            <div className="ml-2 flex items-center flex-shrink-0">
-              <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
-              <span className="ml-1 text-xs text-orange-600 font-medium">Processing...</span>
-            </div>
-          );
-        } else {
-          return <span className="ml-2 w-2 h-2 bg-gray-300 rounded-full flex-shrink-0" title="Pending"></span>;
-        }
-      };
-
-      const getTagColor = (tag: string) => {
-        switch (tag) {
-          case 'Processing':
-            return 'bg-orange-100 text-orange-700 animate-pulse';
-          case 'Updating':
-          case 'Description':
-            return 'bg-blue-100 text-blue-700 animate-pulse';
-          case 'Translated':
-            return 'bg-blue-100 text-blue-700';
-          case 'Complete':
-          case 'Detailed':
-            return 'bg-green-100 text-green-700';
-          case 'Pending':
-            return 'bg-gray-100 text-gray-500';
-          default:
-            return 'bg-gray-100 text-gray-700';
-        }
-      };
-
-      // Cursor風の徐々に表示効果 + ストリーミング更新ハイライト
-      const isNewlyTranslated = newItemAnimations.has(item.id);
-      const isStreamingUpdate = streamingUpdates.has(item.original) || streamingUpdates.has(item.name);
-      const shouldHighlight = isNewlyTranslated || item.isCurrentlyProcessing || item.isPartiallyComplete || isStreamingUpdate;
-
-      return (
-        <div 
-          className={`bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-all duration-500 cursor-pointer ${
-            item.isCurrentlyProcessing 
-              ? 'border-orange-200 ring-1 ring-orange-100' 
-              : item.isComplete 
-                ? 'border-green-200' 
-                : item.isPartiallyComplete
-                  ? 'border-blue-200 ring-1 ring-blue-100'
-                  : item.isTranslated 
-                    ? 'border-blue-200' 
-                    : 'border-gray-100'
-          } ${
-            isNewlyTranslated 
-              ? 'transform scale-105 ring-2 ring-blue-300 shadow-lg animate-pulse' 
-              : ''
-          } ${
-            isStreamingUpdate
-              ? 'transform scale-105 ring-2 ring-green-300 shadow-lg animate-bounce'
-              : ''
-          } ${
-            shouldHighlight 
-              ? 'bg-gradient-to-r from-blue-50 to-white' 
-              : ''
-          }`}
-          onClick={() => setSelectedItem(item)}
-        >
-          <div className="p-3 sm:p-4">
-            <div className="flex justify-between items-start">
-              <div className="flex-1 pr-3 sm:pr-4 min-w-0">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center min-w-0">
-                        <h3 className={`text-base sm:text-lg font-semibold text-gray-900 truncate transition-all duration-300 ${
-                          isNewlyTranslated ? 'text-blue-600 animate-pulse' : ''
-                        }`}>
-                          {isNewlyTranslated ? (
-                            <TypewriterText text={item.name} speed={50} />
-                          ) : (
-                            item.name
-                          )}
-                        </h3>
-                        {getStatusIndicator()}
-                      </div>
-                      <span className="text-base sm:text-lg font-bold text-gray-900 ml-2 flex-shrink-0">¥{item.price}</span>
-                    </div>
-                    <p className="text-xs sm:text-sm text-gray-500 truncate">{item.original} • {item.subtitle}</p>
-                  </div>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleFavorite(item.id);
-                    }}
-                    className="p-1 ml-2 flex-shrink-0"
-                  >
-                    <Heart 
-                      size={18} 
-                      className={favorites.has(item.id) ? 'text-red-500 fill-current' : 'text-gray-400'} 
-                    />
-                  </button>
-                </div>
-                
-                <p className="text-xs sm:text-sm text-gray-700 leading-relaxed mb-3 line-clamp-2">
-                  {truncatedDescription}
-                </p>
-
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-wrap gap-1">
-                    {item.tags.slice(0, 2).map((tag: string, index: number) => (
-                      <span 
-                        key={index} 
-                        className={`text-xs px-2 py-1 rounded-full ${getTagColor(tag)}`}
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                    {item.spiceLevel > 0 && (
-                      <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
-                        {'🌶️'.repeat(Math.min(item.spiceLevel, 3))}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gray-100 rounded-lg flex items-center justify-center text-2xl sm:text-3xl flex-shrink-0">
-                {item.image}
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    };
+    // RealtimeMenuCard component moved to MenuItemCard.tsx
 
     if (realtimeMenuItems.length === 0) {
       return (
@@ -1162,242 +744,43 @@ const MenuTranslator = () => {
          return (
        <div className="w-full bg-gray-50 min-h-screen">
          <div className="max-w-md mx-auto min-h-screen bg-gray-50">
-           {/* Header - モバイル対応（Stage3詳細進捗表示 + デバッグ情報） */}
-           <div className="bg-white shadow-sm p-4 sticky top-0 z-10">
-             <div className="text-center">
-               <h1 className="text-lg sm:text-xl font-bold text-gray-900 mb-1">
-                 {currentStage === 2 && 'Menu Structure Detected'}
-                 {currentStage === 3 && (stage3Completed ? '✅ Translation Complete!' : 'Translating Menu Items')}
-                 {currentStage >= 4 && 'Adding Detailed Information'}
-            </h1>
-
-               {/* リアルタイムデバッグ情報（開発用） */}
-               {isDebugVisible && (
-                 <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
-                   <div className="text-left space-y-1">
-                     <div>🔄 Updated at {new Date(lastUpdateTime).toLocaleTimeString()}</div>
-                     <div>📊 Items: {realtimeMenuItems.length} | 🌍 Translated: {realtimeMenuItems.filter(item => item.isTranslated).length} | 🔄 Partial: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length} | ✅ Complete: {realtimeMenuItems.filter(item => item.isComplete).length}</div>
-                     <div>📋 Raw Categories: {Object.keys((stageData as StageData).categories || {}).length}</div>
-                     <div>🌍 Translated Categories: {Object.keys((stageData as StageData).translatedCategories || {}).length}</div>
-                     <div>🔄 Partial Results: {Object.keys((stageData as StageData).partialResults || {}).length}</div>
-                     <div>📝 Partial Menu: {Object.keys((stageData as StageData).partialMenu || {}).length}</div>
-                     {(stageData as any).processing_category && (
-                       <div>⚡ Processing: {(stageData as any).processing_category}</div>
-                     )}
-                     {realtimeMenuItems.length > 0 && (
-                       <div className="mt-1 text-xs text-gray-600">
-                         🎯 Sample Item States: {realtimeMenuItems.slice(0, 3).map((item, i) => 
-                           `${i+1}:${item.isTranslated?'T':''}${item.isPartiallyComplete?'P':''}${item.isComplete?'C':''}`
-                         ).join(' ')}
-          </div>
-                     )}
-                   </div>
-                 </div>
-               )}
-               
-               {/* Stage3 詳細進捗表示 */}
-               {currentStage === 3 && (
-                 <div className="space-y-1">
-                   {stage3Completed ? (
-                     <div className="bg-green-50 rounded-lg p-2 border border-green-200">
-                       <p className="text-xs sm:text-sm text-green-800 font-medium">
-                         🎉 All {realtimeMenuItems.length} items translated successfully!
-                       </p>
-                       {stageData && (stageData as any).translation_method && (
-                         <p className="text-xs text-green-600">
-                           Method: {(stageData as any).translation_method === 'google_translate' ? 'Google Translate API' : 'OpenAI'}
-                         </p>
-                       )}
-                       <p className="text-xs text-green-600">
-                         ✨ Now adding detailed descriptions...
-                       </p>
-                     </div>
-                   ) : (
-                     <>
-                   <p className="text-xs sm:text-sm text-gray-600">
-                     {realtimeMenuItems.filter(item => item.isTranslated).length} of {realtimeMenuItems.length} items translated
-                   </p>
-                   {stageData && (stageData as any).processing_category && (
-                     <div className="flex items-center justify-center space-x-2">
-                       <span className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span>
-                       <p className="text-xs text-orange-600 font-medium">
-                         Translating: {(stageData as any).processing_category}
-                       </p>
-                     </div>
-                   )}
-                   {stageData && (stageData as any).progress_percent && (
-                     <p className="text-xs text-blue-600">
-                       {Math.round((stageData as any).progress_percent)}% complete
-                     </p>
-                   )}
-                   {stageData && (stageData as any).elapsed_time && (
-                     <p className="text-xs text-gray-500">
-                       Elapsed: {Math.round((stageData as any).elapsed_time / 1000)}s
-                     </p>
-                       )}
-                     </>
-                   )}
-                 </div>
-               )}
-
-               {/* Stage4 詳細進捗表示（ストリーミング強化） */}
-               {currentStage >= 4 && (
-                 <div className="space-y-1">
-                   <p className="text-xs sm:text-sm text-gray-600">
-                     {realtimeMenuItems.filter(item => item.isComplete || item.isPartiallyComplete).length} of {realtimeMenuItems.length} items processed
-                   </p>
-                   <p className="text-xs text-gray-500">
-                     Complete: {realtimeMenuItems.filter(item => item.isComplete).length} | 
-                     Updating: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length}
-                   </p>
-                   
-                   {/* リアルタイム処理状況 */}
-                   {stageData && (stageData as any).processing_category && (
-                     <div className="flex items-center justify-center space-x-2">
-                       <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                       <p className="text-xs text-green-600 font-medium">
-                         Detailing: {(stageData as any).processing_category}
-                       </p>
-                     </div>
-                   )}
-                   
-                   {/* ストリーミング更新の表示 */}
-                   {stageData && (stageData as any).streaming_update && (
-                     <div className="bg-green-50 rounded-lg p-2 border border-green-200">
-                       <p className="text-xs text-green-800 font-medium">
-                         📺 {(stageData as any).newly_processed_items?.length || 0} items updated in real-time
-                       </p>
-                       {(stageData as any).chunk_completed && (
-                         <p className="text-xs text-green-600">
-                           Progress: Chunk {(stageData as any).chunk_completed}
-                         </p>
-                       )}
-                     </div>
-                   )}
-                   
-                   {/* カテゴリ完了の表示 */}
-                   {stageData && (stageData as any).category_completion && (
-                     <div className="bg-blue-50 rounded-lg p-2 border border-blue-200">
-                       <p className="text-xs text-blue-800 font-medium">
-                         🎯 {(stageData as any).category_completed} category completed!
-                       </p>
-                       <p className="text-xs text-blue-600">
-                         {(stageData as any).category_items} items with detailed descriptions
-                       </p>
-                     </div>
-                   )}
-                   
-                   {stageData && (stageData as any).progress_percent && (
-                     <p className="text-xs text-green-600">
-                       {Math.round((stageData as any).progress_percent)}% complete
-                     </p>
-                   )}
-                 </div>
-               )}
-
-               {/* Stage2 簡易表示 */}
-               {currentStage === 2 && (
-                 <p className="text-xs sm:text-sm text-gray-600 mb-1">
-                   {realtimeMenuItems.length} items detected, ready for translation
-                 </p>
-               )}
-
-               {/* 共通のハートビート表示 */}
-               {stageData && (stageData as any).heartbeat && (
-                 <div className="mt-2 flex items-center justify-center space-x-1">
-                   <span className="text-xs text-gray-400">●</span>
-                   <span className="text-xs text-gray-400 animate-pulse">●</span>
-                   <span className="text-xs text-gray-400">●</span>
-                 </div>
-               )}
-             </div>
-           </div>
+           {/* Header - TranslationStatusコンポーネントに置き換え */}
+           <TranslationStatus
+             isAnalyzing={false}
+             currentStage={currentStage}
+             stageData={stageData}
+             stage1Progress={0}
+             stage2Progress={0}
+             detectedItems={[]}
+             analysisItems={[]}
+             onCancelAnalysis={() => {}}
+             realtimeMenuItems={realtimeMenuItems}
+             stage3Completed={stage3Completed}
+             isDebugVisible={isDebugVisible}
+             lastUpdateTime={lastUpdateTime}
+           />
 
            {/* Categories - モバイル対応（Stage3進捗表示強化） */}
-           <div className="bg-white border-b border-gray-200 sticky top-[80px] sm:top-[88px] z-10">
-             <div className="flex overflow-x-auto p-3 sm:p-4 space-x-2 sm:space-x-4 scrollbar-hide">
-               {realtimeCategories.map((category) => {
-                 const getButtonStyle = () => {
-                   if (selectedCategory === category.id) {
-                     return 'bg-orange-500 text-white';
-                   } else if (category.isCurrentlyProcessing) {
-                     return 'bg-orange-100 text-orange-700 ring-2 ring-orange-200 animate-pulse';
-                   } else if ((category.completed || 0) > 0 && (category.completed || 0) === (category.count || 0)) {
-                     return 'bg-green-100 text-green-700 hover:bg-green-200';
-                   } else if ((category.realtimeCompleted || category.completed || 0) > 0) {
-                     return 'bg-green-100 text-green-700 hover:bg-green-200';
-                   } else if ((category.realtimePartial || category.partiallyCompleted || 0) > 0) {
-                     return 'bg-blue-100 text-blue-700 hover:bg-blue-200 ring-1 ring-blue-200 animate-pulse';
-                   } else if ((category.realtimeTranslated || category.translated || 0) > 0) {
-                     return 'bg-blue-100 text-blue-700 hover:bg-blue-200';
-                   } else {
-                     return 'bg-gray-100 text-gray-700 hover:bg-gray-200';
-                   }
-                 };
-
-                 const getProgressInfo = () => {
-                   if (category.id === 'all') {
-                     if (currentStage >= 4) {
-                       // Stage4では、完了+部分完了の数を表示
-                       const totalProgressing = (category.completed || 0) + (category.partiallyCompleted || 0);
-                       return `${totalProgressing}/${category.count || 0}`;
-                     } else {
-                       return `${category.completed || 0}/${category.count || 0}`;
-                     }
-                   } else if (currentStage >= 4) {
-                     // Stage4では、リアルタイム数とpartial数も考慮
-                     const totalProgressing = (category.realtimeCompleted || category.completed || 0) + 
-                                             (category.realtimePartial || category.partiallyCompleted || 0);
-                     return `${totalProgressing}/${category.count || 0}`;
-                   } else if (currentStage >= 3) {
-                     return `${category.realtimeTranslated || category.translated || 0}/${category.count || 0}`;
-                   } else {
-                     return `${category.count || 0}`;
-                   }
-                 };
-
-                 return (
-                   <button
-                     key={category.id}
-                     onClick={() => setSelectedCategory(category.id)}
-                     className={`flex-shrink-0 px-3 sm:px-4 py-2 rounded-full text-xs sm:text-sm font-medium transition-all whitespace-nowrap relative ${getButtonStyle()}`}
-                   >
-                     <span className="mr-1 sm:mr-2">{category.icon}</span>
-                     {category.name}
-                     {category.isCurrentlyProcessing && (
-                       <span className="ml-1 text-xs">
-                         <span className="inline-block w-1 h-1 bg-current rounded-full animate-bounce"></span>
-                       </span>
-                     )}
-                     {category.id !== 'all' && (
-                       <span className="ml-1 text-xs opacity-75">
-                         ({getProgressInfo()})
-                       </span>
-                     )}
-                     {category.id === 'all' && (
-                       <span className="ml-1 text-xs opacity-75">
-                         ({getProgressInfo()})
-                       </span>
-                     )}
-                     {/* 進捗バー（カテゴリー別） */}
-                     {category.progress !== undefined && category.progress > 0 && category.progress < 100 && currentStage >= 3 && (
-                       <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white bg-opacity-30 rounded-full overflow-hidden">
-                         <div 
-                           className="h-full bg-white transition-all duration-300"
-                           style={{ width: `${category.progress}%` }}
-                         ></div>
-                       </div>
-                     )}
-                   </button>
-                 );
-               })}
-             </div>
-           </div>
+           <MenuCategoryList
+             categories={realtimeCategories}
+             selectedCategory={selectedCategory}
+             onCategorySelect={setSelectedCategory}
+             currentStage={currentStage}
+             stageData={stageData}
+           />
 
            {/* Menu Items - モバイル対応 */}
            <div className="p-3 sm:p-4 space-y-3 sm:space-y-4 pb-20">
              {filteredItems.map((item) => (
-               <RealtimeMenuCard key={item.id} item={item} />
+               <MenuItemCard
+                 key={item.id}
+                 item={item}
+                 isFavorite={favorites.has(item.id)}
+                 onToggleFavorite={toggleFavorite}
+                 onItemClick={setSelectedItem}
+                 newItemAnimations={newItemAnimations}
+                 streamingUpdates={streamingUpdates}
+               />
              ))}
            </div>
          </div>
@@ -1756,234 +1139,22 @@ const MenuTranslator = () => {
 
         {/* 分析画面 */}
           <AnimatePresence>
-          {isAnalyzing && (
-              <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="max-w-2xl mx-auto"
-            >
-              {/* Header */}
-              <div className="text-center mb-8">
-                <div className="flex items-center justify-center space-x-4 mb-4">
-                  <div className="w-12 h-12 bg-gradient-to-r from-orange-500 to-red-500 rounded-lg flex items-center justify-center">
-                    <span className="text-white text-xl">🍽️</span>
-                  </div>
-                  <h1 className="text-2xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
-                    MenuSense
-                  </h1>
-                </div>
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  {currentStage === 1 ? 'Reading your menu...' : 'Understanding the dishes...'}
-                </h2>
-                <p className="text-gray-600">
-                  {currentStage === 1 
-                    ? 'Extracting text and identifying menu items' 
-                    : 'Adding context, ingredients, and cultural insights'
-                  }
-                </p>
-              </div>
+          {(isAnalyzing && currentStage <= 2) && (
+            <TranslationStatus
+              isAnalyzing={isAnalyzing}
+              currentStage={currentStage}
+              stageData={stageData}
+              stage1Progress={stage1Progress}
+              stage2Progress={stage2Progress}
+              detectedItems={detectedItems}
+              analysisItems={analysisItems}
+              onCancelAnalysis={cancelAnalysis}
+            />
+          )}
 
-              {/* Stage Indicators */}
-              <div className="flex items-center justify-center space-x-8 mb-8">
-                {/* Stage 1 */}
-                <div className="flex flex-col items-center">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-2 transition-all duration-300 ${
-                    currentStage >= 1 
-                      ? (currentStage === 1 ? 'bg-orange-500 text-white' : 'bg-green-500 text-white') 
-                      : 'bg-gray-200 text-gray-400'
-                  }`}>
-                    {currentStage === 1 ? (
-                      <Eye className="w-6 h-6" />
-                    ) : currentStage > 1 ? (
-                      <CheckCircle className="w-6 h-6" />
-                    ) : (
-                      <Camera className="w-6 h-6" />
-                    )}
-                  </div>
-                  <span className={`text-sm font-medium ${currentStage >= 1 ? 'text-gray-900' : 'text-gray-400'}`}>
-                    OCR Scan
-                  </span>
-                </div>
-
-                {/* Arrow */}
-                <div className="flex-1 h-0.5 bg-gray-300 relative">
-                  <div 
-                    className={`absolute top-0 left-0 h-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-1000 ${
-                      currentStage >= 2 ? 'w-full' : 'w-0'
-                    }`}
-                  ></div>
-                </div>
-
-                {/* Stage 2 */}
-                <div className="flex flex-col items-center">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-2 transition-all duration-300 ${
-                    currentStage >= 2 
-                      ? (currentStage === 2 ? 'bg-orange-500 text-white' : 'bg-green-500 text-white') 
-                      : 'bg-gray-200 text-gray-400'
-                  }`}>
-                    {currentStage === 2 ? (
-                      <Brain className="w-6 h-6" />
-                    ) : currentStage > 2 ? (
-                      <CheckCircle className="w-6 h-6" />
-                    ) : (
-                      <Brain className="w-6 h-6" />
-                    )}
-                  </div>
-                  <span className={`text-sm font-medium ${currentStage >= 2 ? 'text-gray-900' : 'text-gray-400'}`}>
-                    AI Analysis
-                  </span>
-                </div>
-              </div>
-
-              {/* Main Content */}
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
-                {currentStage === 1 ? (
-                  // Stage 1: OCR & Text Detection
-                <div className="space-y-6">
-                    <div className="flex items-center justify-center space-x-4 mb-6">
-                      <LoadingSpinner />
-                      <span className="text-lg font-semibold text-gray-900">Scanning Menu Image</span>
-                  </div>
-                  
-                    <ProgressBar progress={stage1Progress} />
-                    
-                    <div className="text-center text-sm text-gray-600 mb-6">
-                      {Math.round(stage1Progress)}% complete
-                      {stageData && (stageData as any).elapsed_time && (
-                        <span className="text-xs text-gray-500 block">
-                          Elapsed: {Math.round((stageData as any).elapsed_time / 1000)}s
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Detected Items */}
-                    <div className="space-y-3">
-                      <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                        <Eye className="w-5 h-5 text-orange-500" />
-                        Detected Items:
-                      </h3>
-                      <div className="bg-gray-50 rounded-lg p-4 min-h-[120px]">
-                        {detectedItems.map((item, index) => (
-                          <div 
-                            key={index} 
-                            className="flex items-center space-x-2 py-1 animate-fade-in"
-                            style={{ animationDelay: `${index * 100}ms` }}
-                          >
-                            <span className="text-green-500">✓</span>
-                            <span className="text-sm text-gray-700">{item.text}</span>
-                            {index === detectedItems.length - 1 && stageData && (stageData as any).heartbeat && (
-                              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse ml-2"></span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Simulated OCR Preview */}
-                    <div className="bg-gradient-to-r from-orange-50 to-yellow-50 rounded-lg p-4 border border-orange-200">
-                      <h4 className="font-medium text-gray-900 mb-2">Raw Text Detected:</h4>
-                      <div className="text-sm text-gray-600 font-mono">
-                        焼き鳥 ¥300<br/>
-                        麻婆豆腐 ¥600<br/>
-                        海老フライ ¥450<br/>
-                        <span className="animate-pulse">|</span>
-                      </div>
-                    </div>
-                  </div>
-                ) : currentStage === 2 ? (
-                  // Stage 2: AI Analysis
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-center space-x-4 mb-6">
-                      <div className="relative">
-                        <Brain className="w-8 h-8 text-orange-500 animate-pulse" />
-                        <Sparkles className="w-4 h-4 text-yellow-500 absolute -top-1 -right-1 animate-bounce" />
-                      </div>
-                      <span className="text-lg font-semibold text-gray-900">AI Analysis in Progress</span>
-                    </div>
-
-                    <ProgressBar progress={stage2Progress} color="purple" />
-                    
-                    <div className="text-center text-sm text-gray-600 mb-6">
-                      {Math.round(stage2Progress)}% complete
-                      {stageData && (stageData as any).progress_percent && (
-                        <span className="text-xs text-orange-600 block font-medium">
-                          Backend: {Math.round((stageData as any).progress_percent)}%
-                        </span>
-                      )}
-                      {stageData && (stageData as any).processing_category && (
-                        <span className="text-xs text-gray-500 block">
-                          Processing: {(stageData as any).processing_category}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Analysis Steps */}
-                    <div className="space-y-3">
-                      <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                        <Brain className="w-5 h-5 text-purple-500" />
-                        Processing Steps:
-                      </h3>
-                      <div className="bg-gray-50 rounded-lg p-4 min-h-[120px]">
-                        {analysisItems.map((item, index) => (
-                          <div 
-                            key={index} 
-                            className="flex items-center space-x-2 py-1 animate-fade-in"
-                            style={{ animationDelay: `${index * 100}ms` }}
-                          >
-                            <span className="text-purple-500">⚡</span>
-                            <span className="text-sm text-gray-700">{item.text}</span>
-                            {index === analysisItems.length - 1 && stageData && (stageData as any).heartbeat && (
-                              <span className="w-2 h-2 bg-purple-500 rounded-full animate-pulse ml-2"></span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* AI Insights Preview */}
-                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-4 border border-purple-200">
-                      <h4 className="font-medium text-gray-900 mb-2">AI Insights Preview:</h4>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex items-center space-x-2">
-                          <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                          <span className="text-gray-600">Yakitori: Traditional grilled chicken skewers</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className="w-2 h-2 bg-red-500 rounded-full"></span>
-                          <span className="text-gray-600">Mapo Tofu: Contains soy, very spicy 🌶️🌶️🌶️🌶️</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                          <span className="text-gray-600">Ebi Fry: Breaded fried shrimp, contains shellfish</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  // Stage 2完了後（categories取得後）からリアルタイムメニュー表示開始
+          {/* Stage 3以降のリアルタイムメニュー表示 */}
+          {(isAnalyzing && currentStage >= 3) && (
                   <RealtimeMenuDisplay />
-                )}
-              </div>
-
-              {/* Demo Controls */}
-              <div className="text-center mt-6">
-                <button 
-                  onClick={() => {
-                    setIsAnalyzing(false);
-                    setCurrentSessionId(undefined);
-                    // 進捗をリセット
-                    setStage1Progress(0);
-                    setStage2Progress(0);
-                    setDetectedItems([]);
-                    setAnalysisItems([]);
-                  }}
-                  className="text-orange-600 hover:text-orange-800 font-medium text-sm"
-                >
-                  ← Cancel Analysis
-                </button>
-                </div>
-              </motion.div>
             )}
           </AnimatePresence>
 
@@ -2087,8 +1258,7 @@ const MenuTranslator = () => {
                         onClick={async () => {
                           try {
                             // バックエンドの診断エンドポイントを呼び出し
-                            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-                            const response = await fetch(`${backendUrl}/diagnostic`);
+                            const response = await fetch(`${API_BASE_URL}/diagnostic`);
                             const data = await response.json();
                             console.log('🔍 System Diagnostic:', data);
                             
@@ -2242,23 +1412,7 @@ ${!data.vision_api?.available ? '\n⚠️ Vision APIの問題が原因でStage1�
         onToggle={() => setIsDebugVisible(!isDebugVisible)}
       />
 
-      {/* CSS Animations */}
-      <style jsx>{`
-        @keyframes fade-in {
-          from {
-            opacity: 0;
-            transform: translateX(-10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-        
-        .animate-fade-in {
-          animation: fade-in 0.5s ease-out forwards;
-        }
-      `}</style>
+      {/* CSS Animations moved to TranslationStatus.tsx */}
     </div>
   );
 };

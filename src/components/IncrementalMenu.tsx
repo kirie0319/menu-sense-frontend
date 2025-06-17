@@ -3,24 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, CheckCircle, Loader2 } from 'lucide-react';
-
-interface MenuItemState {
-  japanese_name?: string;
-  english_name?: string;
-  description?: string;
-  price?: string;
-  stage: number; // どの段階まで完了しているか
-}
-
-interface IncrementalMenuProps {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  categories?: Record<string, any[]>; // Stage 2: 日本語カテゴリ
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  translatedCategories?: Record<string, any[]>; // Stage 3: 翻訳済み
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  finalMenu?: Record<string, any[]>; // Stage 4: 最終メニュー
-  currentStage: number;
-}
+import { MenuItemState, IncrementalMenuProps } from '@/types';
 
 const IncrementalMenu = ({ 
   categories, 
