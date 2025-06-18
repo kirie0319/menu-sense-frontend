@@ -294,7 +294,7 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
           {/* Stage3 詳細進捗表示 */}
           {currentStage === 3 && (
             <div className="space-y-1">
-              {stage3Completed ? (
+              {stage3Completed || (stageData as any)?.stage3_completed || (stageData as any)?.show_translated_menu ? (
                 <div className="bg-green-50 rounded-lg p-2 border border-green-200">
                   <p className="text-xs sm:text-sm text-green-800 font-medium">
                     🎉 All {realtimeMenuItems.length} items translated successfully!

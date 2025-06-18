@@ -1,5 +1,5 @@
-import MenuTranslator from '@/components/MenuTranslator';
+import HomePage from '@/components/HomePage';
 
 export default function Home() {
-  return <MenuTranslator />;
+  return <HomePage />;
 }

@@ -89,7 +89,8 @@ export class MenuTranslationApi {
    */
   static async translateMenuWithProgress(
     file: File,
-    onProgress: (stage: number, status: string, message: string, data?: unknown) => void
+    onProgress: (stage: number, status: string, message: string, data?: unknown) => void,
+    existingSessionId?: string
   ): Promise<TranslationResponse> {
     const startTime = Date.now();
     console.log(`[API] 🔄 Starting progress translation for file: ${file.name} (${file.size} bytes)`);
@@ -102,22 +103,31 @@ export class MenuTranslationApi {
     }, 5 * 60 * 1000); // 5分タイムアウト（延長）
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
+      let sessionId: string;
 
-      console.log(`[API] 📤 Uploading file to /process`);
-      
-      // セッション開始
-      const startResponse = await api.post('/process', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        signal: abortController.signal,
-        timeout: 60000, // 60秒（アップロードタイムアウト延長）
-      });
+      if (existingSessionId) {
+        // 既存のセッションIDを使用
+        sessionId = existingSessionId;
+        console.log(`[API] 🔄 Using existing session ID: ${sessionId}`);
+      } else {
+        // 新しいセッションを作成
+        const formData = new FormData();
+        formData.append('file', file);
 
-      const sessionId = startResponse.data.session_id;
-      console.log(`[API] 🆔 Session started with ID: ${sessionId}`);
+        console.log(`[API] 📤 Uploading file to /process`);
+        
+        // セッション開始
+        const startResponse = await api.post('/process', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+          signal: abortController.signal,
+          timeout: 60000, // 60秒（アップロードタイムアウト延長）
+        });
+
+        sessionId = startResponse.data.session_id;
+        console.log(`[API] 🆔 Session started with ID: ${sessionId}`);
+      }
 
       // Server-Sent Eventsで進捗を監視
       const result = await this.monitorProgress(sessionId, onProgress, abortController, startTime);
@@ -125,7 +135,11 @@ export class MenuTranslationApi {
       const totalDuration = Date.now() - startTime;
       console.log(`[API] ✅ Progress translation completed in ${totalDuration}ms`);
       
-      return result;
+      // セッションIDを結果に含める
+      return {
+        ...result,
+        session_id: sessionId
+      };
       
     } catch (error) {
       const duration = Date.now() - startTime;
@@ -166,7 +180,7 @@ export class MenuTranslationApi {
   }
 
   /**
-   * Server-Sent Eventsで進捗を監視（Stage 4安定性強化版）
+   * Server-Sent Eventsで進捗を監視（安定性強化版）
    */
   private static async monitorProgress(
     sessionId: string,
@@ -175,7 +189,42 @@ export class MenuTranslationApi {
     startTime: number
   ): Promise<TranslationResponse> {
     return new Promise((resolve, reject) => {
-      const eventSource = new EventSource(`${API_BASE_URL}/progress/${sessionId}`);
+      // URL安全性の確保
+      const encodedSessionId = encodeURIComponent(sessionId);
+      const sseUrl = `${API_BASE_URL}/progress/${encodedSessionId}`;
+      
+      console.log(`[SSE] 🔗 Starting SSE connection to: ${sseUrl}`);
+      
+      let eventSource: EventSource | null = null;
+      let heartbeatInterval: NodeJS.Timeout | null = null;
+      let isCleanedUp = false;
+      
+      // クリーンアップ関数
+      const cleanup = (reason: string) => {
+        if (isCleanedUp) return;
+        isCleanedUp = true;
+        
+        console.log(`[SSE] 🧹 Cleaning up SSE connection: ${reason}`);
+        
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+          heartbeatInterval = null;
+        }
+        
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+      };
+      
+      try {
+        eventSource = new EventSource(sseUrl);
+      } catch (error) {
+        console.error(`[SSE] ❌ Failed to create EventSource:`, error);
+        reject(new Error(`Failed to create SSE connection: ${error instanceof Error ? error.message : 'Unknown error'}`));
+        return;
+      }
+      
       let lastHeartbeat = Date.now();
       let currentStage = 1;
       let stage4StartTime: number | null = null;
@@ -188,196 +237,215 @@ export class MenuTranslationApi {
           case 1: return 60 * 1000;  // 1分 - OCR
           case 2: return 90 * 1000;  // 1.5分 - カテゴリ分析
           case 3: return 120 * 1000; // 2分 - 翻訳
-          case 4: return 300 * 1000; // 5分 - 詳細説明（最も時間がかかる）
+          case 4: return 300 * 1000; // 5分 - 詳細説明
           default: return 120 * 1000;
         }
       };
       
-      // ハートビート監視
+      // ハートビート監視（安全性強化）
       const checkHeartbeat = () => {
+        if (isCleanedUp) return;
+        
         const timeout = getStageTimeout(currentStage);
         const elapsed = Date.now() - lastHeartbeat;
         
         if (elapsed > timeout) {
-          clearInterval(heartbeatInterval);
-          eventSource.close();
-          
           // Stage 4で部分結果がある場合は、それを返す
           if (currentStage === 4 && Object.keys(stage4PartialResults).length > 0) {
             console.warn('⚠️ Stage 4 timeout detected, but partial results available');
             
-            // 部分結果で最終レスポンスを構築
-            const menuItems: ApiMenuItem[] = [];
-            for (const items of Object.values(stage4PartialResults)) {
-              const itemArray = items as Record<string, string>[];
-              for (const item of itemArray) {
-                menuItems.push({
-                  japanese_name: item.japanese_name || 'N/A',
-                  english_name: item.english_name || 'N/A',
-                  description: item.description || 'Description generation incomplete due to timeout.',
-                  price: item.price || ''
-                });
+            try {
+              // 部分結果で最終レスポンスを構築
+              const menuItems: ApiMenuItem[] = [];
+              for (const items of Object.values(stage4PartialResults)) {
+                const itemArray = items as Record<string, string>[];
+                for (const item of itemArray) {
+                  menuItems.push({
+                    japanese_name: item.japanese_name || 'N/A',
+                    english_name: item.english_name || 'N/A',
+                    description: item.description || 'Description generation incomplete due to timeout.',
+                    price: item.price || ''
+                  });
+                }
               }
-            }
-            
-            if (finalResult) {
-              finalResult.menu_items = menuItems;
-              resolve(finalResult);
-            } else {
-              reject(new Error('Stage 4 timeout: Partial results available but incomplete translation data.'));
+              
+              if (finalResult) {
+                finalResult.menu_items = menuItems;
+                cleanup('Stage 4 timeout with partial results');
+                resolve(finalResult);
+              } else {
+                cleanup('Stage 4 timeout without final result');
+                reject(new Error('Stage 4 timeout: Partial results available but incomplete translation data.'));
+              }
+            } catch (partialError) {
+              cleanup('Stage 4 timeout with partial result error');
+              reject(new Error(`Stage 4 timeout and partial result processing failed: ${partialError instanceof Error ? partialError.message : 'Unknown error'}`));
             }
           } else {
+            cleanup(`Stage ${currentStage} timeout`);
             reject(new Error(`Stage ${currentStage} timeout (${timeout/1000}s). No response from server.`));
           }
         }
       };
       
-      const heartbeatInterval = setInterval(checkHeartbeat, 10000); // 10秒ごとにチェック
+      heartbeatInterval = setInterval(checkHeartbeat, 10000); // 10秒ごとにチェック
 
-      // AbortControllerでキャンセル
-      abortController.signal.addEventListener('abort', () => {
-        clearInterval(heartbeatInterval);
-        eventSource.close();
+      // AbortControllerでキャンセル（1回だけ設定）
+      const abortHandler = () => {
+        cleanup('User cancellation');
         reject(new Error('Translation was cancelled'));
-      });
+      };
+      
+      abortController.signal.addEventListener('abort', abortHandler, { once: true });
 
+      // EventSource接続成功
+      eventSource.onopen = (event) => {
+        console.log(`[SSE] ✅ Connection established`, event);
+        lastHeartbeat = Date.now();
+      };
+
+      // メッセージ受信処理（安全性強化）
       eventSource.onmessage = (event) => {
+        if (isCleanedUp) return;
+        
         lastHeartbeat = Date.now();
         console.log(`[SSE] 📨 Message received at ${new Date().toLocaleTimeString()}`);
         
+        let progressData: any;
         try {
-          const progressData = JSON.parse(event.data);
+          progressData = JSON.parse(event.data);
+        } catch (parseError) {
+          console.error('❌ Failed to parse progress data:', parseError, 'Raw data:', event.data);
+          // パースエラーは致命的ではないので継続
+          return;
+        }
+        
+        // Pingメッセージの検知とPong送信
+        if (progressData.type === 'ping') {
+          console.log(`[SSE] 🏓 Ping received from server, sending Pong...`);
           
-          // Pingメッセージの検知とPong送信
-          if (progressData.type === 'ping') {
-            console.log(`[SSE] 🏓 Ping received from server, sending Pong...`);
-            
-            // 非同期でPongを送信（SSE処理をブロックしない）
-            MenuTranslationApi.sendPong(sessionId).catch(error => {
-              console.error(`[SSE] ❌ Failed to send Pong:`, error);
-            });
-            
-            // Pingメッセージは通常の進捗処理をスキップ
-            return;
-          }
-          
-          const { stage, status, message, ...data } = progressData;
-          
-          console.log(`[SSE] 📋 Parsed data:`, {
-            stage,
-            status,
-            message,
-            dataKeys: Object.keys(data),
-            hasPartialResults: !!(data.partial_results || data.partial_menu),
-            isHeartbeat: !!data.heartbeat,
-            isPing: progressData.type === 'ping'
+          // 非同期でPongを送信（SSE処理をブロックしない）
+          MenuTranslationApi.sendPong(sessionId).catch(error => {
+            console.error(`[SSE] ❌ Failed to send Pong:`, error);
           });
           
-          // Stage変更追跡
-          if (stage !== currentStage) {
-            const stageDuration = currentStage > 0 ? Date.now() - (stage4StartTime || lastHeartbeat) : 0;
-            console.log(`[SSE] 🔄 Stage transition: ${currentStage} → ${stage} (previous stage took ${stageDuration}ms)`);
-            
-            if (stage === 4 && currentStage !== 4) {
-              stage4StartTime = Date.now();
-              console.log('[SSE] ⏱️ Stage 4 started - enabling extended monitoring');
+          return;
+        }
+        
+        // ハートビートメッセージやstageフィールドのないメッセージをスキップ
+        if (progressData.type === 'heartbeat' || progressData.heartbeat || typeof progressData.stage === 'undefined') {
+          // Stage 4中は頻繁なハートビートのためログを控えめに
+          if (currentStage === 4) {
+            if (Date.now() - lastHeartbeat > 30000) { // 30秒に1回ログ
+              console.log(`[SSE] 💓 Stage 4 heartbeat (frequent mode)`);
             }
-            
-            currentStage = stage;
+          } else {
+            console.log(`[SSE] 💓 Heartbeat received, maintaining connection...`);
+          }
+          return;
+        }
+        
+        const { stage, status, message, ...data } = progressData;
+        
+        // Stage変更追跡
+        if (stage !== currentStage) {
+          const stageDuration = currentStage > 0 ? Date.now() - (stage4StartTime || lastHeartbeat) : 0;
+          console.log(`[SSE] 🔄 Stage transition: ${currentStage} → ${stage} (previous stage took ${stageDuration}ms)`);
+          
+          if (stage === 4 && currentStage !== 4) {
+            stage4StartTime = Date.now();
+            console.log('[SSE] ⏱️ Stage 4 started - enabling extended monitoring');
           }
           
-          // Stage 4の詳細ログ
-          if (stage === 4) {
-            const elapsed = stage4StartTime ? Date.now() - stage4StartTime : 0;
-            console.log(`[SSE] 🍽️ Stage 4 update (${elapsed}ms elapsed):`, {
-              status,
-              message,
-              processing_category: data.processing_category,
-              category_completed: data.category_completed,
-              progress_percent: data.progress_percent,
-              chunk_progress: data.chunk_progress,
-              partial_categories: data.partial_results ? Object.keys(data.partial_results).length : 0,
-              heartbeat: data.heartbeat,
-              elapsed_time: data.elapsed_time
-            });
-          }
-          
+          currentStage = stage;
+        }
+        
+        // 進捗コールバック実行
+        try {
           onProgress(stage, status, message, data);
-          
-          // 結果データの蓄積
-          if (data.extracted_text) {
-            if (!finalResult) {
-              finalResult = {
-                extracted_text: '',
-                menu_items: []
-              };
-            }
-            finalResult.extracted_text = data.extracted_text;
+        } catch (callbackError) {
+          console.error(`[SSE] ❌ Progress callback error:`, callbackError);
+          // コールバックエラーは継続
+        }
+        
+        // 結果データの蓄積
+        if (data.extracted_text) {
+          if (!finalResult) {
+            finalResult = {
+              extracted_text: '',
+              menu_items: []
+            };
+          }
+          finalResult.extracted_text = data.extracted_text;
+        }
+        
+        // Stage 4の部分結果を監視・蓄積（簡素化版）
+        if (stage === 4) {
+          // 部分結果の収集
+          if (data.partial_results) {
+            Object.assign(stage4PartialResults, data.partial_results);
+            console.log('🔄 Stage 4 partial results updated:', Object.keys(data.partial_results));
           }
           
-          // Stage 4の部分結果を監視・蓄積
-          if (stage === 4) {
-            if (data.partial_results) {
-              console.log('🔄 Stage 4 partial results received:', Object.keys(data.partial_results));
-              stage4PartialResults = { ...stage4PartialResults, ...data.partial_results };
-            }
-            
-            if (data.partial_menu) {
-              console.log('🔄 Stage 4 partial menu received:', Object.keys(data.partial_menu));
-              stage4PartialResults = { ...stage4PartialResults, ...data.partial_menu };
-            }
-            
-            if (data.category_completed) {
-              console.log(`✅ Stage 4 category completed: ${data.category_completed}`);
-            }
-            
-            // Stage 4の進捗ログ
-            if (stage4StartTime) {
-              const elapsed = (Date.now() - stage4StartTime) / 1000;
-              if (elapsed > 60) { // 1分経過後
-                console.log(`⏰ Stage 4 progress: ${elapsed.toFixed(0)}s elapsed, ${Object.keys(stage4PartialResults).length} categories processed`);
-              }
-            }
+          if (data.partial_menu) {
+            Object.assign(stage4PartialResults, data.partial_menu);
+            console.log('🔄 Stage 4 partial menu updated:', Object.keys(data.partial_menu));
           }
           
-          // 最終メニューの処理
-          if (data.final_menu) {
-            console.log('📝 Final menu received:', Object.keys(data.final_menu));
+          // カテゴリ完了時の処理
+          if (data.category_completed) {
+            const completedCategory = data.category_completed;
             
-            if (!finalResult) {
-              finalResult = {
-                extracted_text: '',
-                menu_items: []
-              };
+            // 完了したカテゴリのデータを探す
+            if (data.completed_category_items && Array.isArray(data.completed_category_items)) {
+              stage4PartialResults[completedCategory] = data.completed_category_items;
+              console.log(`✅ Stage 4 category completed: ${completedCategory} (${data.completed_category_items.length} items)`);
+            } else if (data.final_menu && data.final_menu[completedCategory]) {
+              stage4PartialResults[completedCategory] = data.final_menu[completedCategory];
+              console.log(`✅ Stage 4 category completed: ${completedCategory} (from final_menu)`);
             }
-            
-            // final_menuを menu_items 形式に変換
-            const menuItems: ApiMenuItem[] = [];
-            for (const items of Object.values(data.final_menu)) {
-              const itemArray = items as Record<string, string>[];
-              for (const item of itemArray) {
-                menuItems.push({
-                  japanese_name: item.japanese_name || 'N/A',
-                  english_name: item.english_name || 'N/A',
-                  description: item.description || 'No description available',
-                  price: item.price || ''
-                });
-              }
-            }
-            finalResult.menu_items = menuItems;
+          }
+        }
+        
+        // 最終メニューの処理
+        if (data.final_menu) {
+          console.log('📝 Final menu received:', Object.keys(data.final_menu));
+          
+          if (!finalResult) {
+            finalResult = {
+              extracted_text: '',
+              menu_items: []
+            };
           }
           
-          // 完了判定の拡張
-          if ((stage === 4 && status === 'completed') || (stage === 5 && status === 'completed')) {
-            console.log('🎉 Translation process completed!');
-            clearInterval(heartbeatInterval);
-            eventSource.close();
+          // final_menuを menu_items 形式に変換
+          const menuItems: ApiMenuItem[] = [];
+          for (const items of Object.values(data.final_menu)) {
+            const itemArray = items as Record<string, string>[];
+            for (const item of itemArray) {
+              menuItems.push({
+                japanese_name: item.japanese_name || 'N/A',
+                english_name: item.english_name || 'N/A',
+                description: item.description || 'No description available',
+                price: item.price || ''
+              });
+            }
+          }
+          finalResult.menu_items = menuItems;
+        }
+        
+        // 完了判定
+        if ((stage === 4 && status === 'completed') || (stage === 5 && status === 'completed')) {
+          console.log('🎉 Translation process completed!');
+          cleanup('Translation completed');
+          
+          if (finalResult && finalResult.menu_items.length > 0) {
+            resolve(finalResult);
+          } else if (Object.keys(stage4PartialResults).length > 0) {
+            // 部分結果がある場合はそれを使用
+            console.warn('⚠️ Using partial Stage 4 results as final result');
             
-            if (finalResult && finalResult.menu_items.length > 0) {
-              resolve(finalResult);
-            } else if (Object.keys(stage4PartialResults).length > 0) {
-              // 部分結果がある場合はそれを使用
-              console.warn('⚠️ Using partial Stage 4 results as final result');
+            try {
               const menuItems: ApiMenuItem[] = [];
               for (const items of Object.values(stage4PartialResults)) {
                 const itemArray = items as Record<string, string>[];
@@ -396,19 +464,23 @@ export class MenuTranslationApi {
               }
               finalResult.menu_items = menuItems;
               resolve(finalResult);
-            } else {
-              reject(new Error('Translation completed but no menu data received'));
+            } catch (partialError) {
+              reject(new Error(`Translation completed but partial result processing failed: ${partialError instanceof Error ? partialError.message : 'Unknown error'}`));
             }
+          } else {
+            reject(new Error('Translation completed but no menu data received'));
           }
+        }
+        
+        // エラー処理
+        if (status === 'error') {
+          console.error(`❌ Stage ${stage} error:`, message);
           
-          // エラー処理の強化
-          if (status === 'error') {
-            console.error(`❌ Stage ${stage} error:`, message);
+          // Stage 4エラー時の復旧処理
+          if (stage === 4 && Object.keys(stage4PartialResults).length > 0) {
+            console.warn('⚠️ Stage 4 error detected, but partial results available');
             
-            // Stage 4エラー時の復旧処理
-            if (stage === 4 && Object.keys(stage4PartialResults).length > 0) {
-              console.warn('⚠️ Stage 4 error detected, but partial results available');
-              
+            try {
               const menuItems: ApiMenuItem[] = [];
               for (const items of Object.values(stage4PartialResults)) {
                 const itemArray = items as Record<string, string>[];
@@ -427,79 +499,95 @@ export class MenuTranslationApi {
               }
               finalResult.menu_items = menuItems;
               
-              clearInterval(heartbeatInterval);
-              eventSource.close();
+              cleanup('Stage 4 error with partial recovery');
               resolve(finalResult);
               return;
+            } catch (partialError) {
+              console.error(`[SSE] ❌ Partial recovery failed:`, partialError);
             }
-            
-            clearInterval(heartbeatInterval);
-            eventSource.close();
-            reject(new Error(`Stage ${stage} failed: ${message}`));
           }
           
-        } catch (parseError) {
-          console.error('❌ Failed to parse progress data:', parseError, 'Raw data:', event.data);
+          cleanup(`Stage ${stage} error`);
+          reject(new Error(`Stage ${stage} failed: ${message}`));
         }
       };
 
+      // SSE接続エラー処理（簡素化版）
       eventSource.onerror = (error) => {
+        if (isCleanedUp) return;
+        
         console.error('❌ SSE connection error:', error);
         
         // エラーの詳細情報を収集
         const errorDetails = {
           type: 'SSE_CONNECTION_ERROR',
-          readyState: eventSource.readyState,
-          url: eventSource.url,
+          readyState: eventSource?.readyState,
+          url: sseUrl,
           currentStage,
           elapsedTime: Date.now() - startTime,
-          lastHeartbeat: new Date(lastHeartbeat).toISOString(),
-          stage4PartialResults: Object.keys(stage4PartialResults).length,
-          error: error
+          lastHeartbeat: new Date(lastHeartbeat).toISOString()
         };
         
         console.error('❌ SSE Error Details:', errorDetails);
-        
-        clearInterval(heartbeatInterval);
-        eventSource.close();
         
         // Stage 4で部分結果がある場合は復旧を試行
         if (currentStage === 4 && Object.keys(stage4PartialResults).length > 0) {
           console.warn('⚠️ Connection error during Stage 4, attempting recovery with partial results');
           
-          const menuItems: ApiMenuItem[] = [];
-          for (const items of Object.values(stage4PartialResults)) {
-            const itemArray = items as Record<string, string>[];
-            for (const item of itemArray) {
-              menuItems.push({
-                japanese_name: item.japanese_name || 'N/A',
-                english_name: item.english_name || 'N/A',
-                description: item.description || 'Description incomplete due to connection error.',
-                price: item.price || ''
-              });
+          try {
+            const menuItems: ApiMenuItem[] = [];
+            let totalItems = 0;
+            
+            for (const [categoryName, items] of Object.entries(stage4PartialResults)) {
+              const itemArray = items as Record<string, string>[];
+              console.log(`   📂 Category "${categoryName}": ${itemArray.length} items`);
+              
+              for (const item of itemArray) {
+                menuItems.push({
+                  japanese_name: item.japanese_name || 'N/A',
+                  english_name: item.english_name || 'N/A',
+                  description: item.description || 'Description incomplete due to connection error.',
+                  price: item.price || ''
+                });
+                totalItems++;
+              }
             }
+            
+            console.log(`🔄 Stage 4 recovery: Constructed ${totalItems} menu items from partial results`);
+            
+            if (finalResult) {
+              finalResult.menu_items = menuItems;
+              cleanup('Stage 4 connection error with recovery');
+              resolve(finalResult);
+            } else {
+              // finalResultが無い場合でも、部分結果で復旧
+              const recoveredResult: TranslationResponse = {
+                extracted_text: '',
+                menu_items: menuItems
+              };
+              console.log(`💡 Stage 4 recovery: Created result from partial data only`);
+              cleanup('Stage 4 connection error with partial recovery');
+              resolve(recoveredResult);
+            }
+            return;
+          } catch (recoveryError) {
+            console.error(`[SSE] ❌ Recovery failed:`, recoveryError);
           }
-          
-          if (finalResult) {
-            finalResult.menu_items = menuItems;
-            resolve(finalResult);
-          } else {
-            reject(new Error(`SSE connection error during Stage 4. Partial results recovered but translation incomplete. Error details: ${JSON.stringify(errorDetails)}`));
-          }
-        } else {
-          // 接続エラーの具体的な原因を特定
-          let errorMessage = `SSE connection error occurred during Stage ${currentStage}`;
-          
-          if (eventSource.readyState === EventSource.CLOSED) {
-            errorMessage += ' (Connection closed by server)';
-          } else if (eventSource.readyState === EventSource.CONNECTING) {
-            errorMessage += ' (Connection failed to establish)';
-          }
-          
-          errorMessage += `. Please check:\n• Backend server is running\n• Network connection is stable\n• CORS configuration allows SSE`;
-          
-          reject(new Error(errorMessage));
         }
+        
+        // 接続エラーの具体的な原因を特定
+        let errorMessage = `SSE connection error occurred during Stage ${currentStage}`;
+        
+        if (eventSource?.readyState === EventSource.CLOSED) {
+          errorMessage += ' (Connection closed by server)';
+        } else if (eventSource?.readyState === EventSource.CONNECTING) {
+          errorMessage += ' (Connection failed to establish)';
+        }
+        
+        errorMessage += `\n\nPlease check:\n• Backend server is running\n• Network connection is stable\n• CORS configuration allows SSE`;
+        
+        cleanup('SSE connection error');
+        reject(new Error(errorMessage));
       };
     });
   }
@@ -509,7 +597,8 @@ export class MenuTranslationApi {
    */
   static async sendPong(sessionId: string): Promise<boolean> {
     try {
-      const response = await api.post(`/pong/${sessionId}`);
+      const encodedSessionId = encodeURIComponent(sessionId);
+      const response = await api.post(`/pong/${encodedSessionId}`);
       console.log(`[API] 🏓 Pong sent for session: ${sessionId}`, response.data);
       return response.data.status === 'pong_received';
     } catch (error) {

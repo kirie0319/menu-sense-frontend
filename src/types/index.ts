@@ -77,6 +77,7 @@ export interface TranslationResponse {
   extracted_text: string;
   menu_items: ApiMenuItem[];
   message?: string;
+  session_id?: string;
 }
 
 export interface TranslationState {

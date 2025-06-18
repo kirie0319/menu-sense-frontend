@@ -67,7 +67,8 @@ const DebugMonitor = ({ sessionId, isVisible, onToggle }: DebugMonitorProps) => 
 
     addLog('info', `Starting SSE monitoring for session: ${sessionId}`);
     
-    const eventSource = new EventSource(`${API_BASE_URL}/progress/${sessionId}`);
+    const encodedSessionId = encodeURIComponent(sessionId);
+    const eventSource = new EventSource(`${API_BASE_URL}/progress/${encodedSessionId}`);
     const connectionStart = Date.now();
     
     setNetworkStatus(prev => ({
@@ -112,7 +113,8 @@ const DebugMonitor = ({ sessionId, isVisible, onToggle }: DebugMonitorProps) => 
           
           // Pongを送信 (非同期)
           if (sessionId) {
-            fetch(`${API_BASE_URL}/pong/${sessionId}`, { method: 'POST' })
+            const encodedSessionId = encodeURIComponent(sessionId);
+            fetch(`${API_BASE_URL}/pong/${encodedSessionId}`, { method: 'POST' })
               .then(() => {
                 const pongTime = new Date().toLocaleTimeString();
                 setNetworkStatus(prev => ({
