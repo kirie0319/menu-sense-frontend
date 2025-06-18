@@ -7,6 +7,7 @@ import { MenuCategories } from './menu/MenuCategories';
 import { MenuItemsGrid } from './menu/MenuItemsGrid';
 import { MenuItemDetail } from './menu/MenuItemDetail';
 import { DebugPanel } from './menu/DebugPanel';
+import { MenuPageSkeleton } from './menu/MenuSkeleton';
 
 interface MenuPageProps {
   onBackToHome: () => void;
@@ -26,6 +27,8 @@ export const MenuPage: React.FC<MenuPageProps> = ({
     selectedFile,
     error,
     ui,
+    isLoading,
+    currentStage,
     // Actions
     setFile,
     translateMenu,
@@ -59,20 +62,15 @@ export const MenuPage: React.FC<MenuPageProps> = ({
   // Get current menu data
   const menuData = getCurrentMenuData();
 
-  // Show loading if no menu data
-  if (!menuData) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-yellow-50 to-red-50 flex items-center justify-center px-4">
-        <div className="text-center">
-          <div className="text-4xl md:text-6xl mb-4">🍽️</div>
-          <p className="text-gray-600 text-base md:text-lg">Loading menu data...</p>
-        </div>
-      </div>
-    );
+  // Show skeleton screen if no menu data or still loading translations
+  const shouldShowSkeleton = !menuData || (isLoading && currentStage < 3);
+  
+  if (shouldShowSkeleton) {
+    return <MenuPageSkeleton />;
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-yellow-50 to-red-50">
+    <div className="min-h-screen bg-white">
       {/* Main content - Mobile optimized */}
       <div className="max-w-6xl mx-auto px-3 md:px-4 py-4 md:py-8 space-y-4 md:space-y-8">
         {/* Error display */}

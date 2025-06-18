@@ -1,9 +1,10 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, Camera, CheckCircle, Brain, Sparkles } from 'lucide-react';
 import { MenuItem, StageData, TranslationStatusProps } from '@/types';
+import { useMenuStore } from '@/lib/store';
 
 // ローディングスピナーコンポーネント
 const LoadingSpinner = ({ color = "orange" }: { color?: string }) => (
@@ -34,6 +35,7 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
   isDebugVisible = false,
   lastUpdateTime
 }) => {
+  const { getOverallProgress, stageData: storeStageData } = useMenuStore();
   // 分析画面のステータス表示
   if (isAnalyzing && currentStage <= 2) {
     return (
@@ -267,29 +269,66 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
             {currentStage >= 4 && 'Adding Detailed Information'}
           </h1>
 
-          {/* リアルタイムデバッグ情報（開発用） */}
-          {isDebugVisible && lastUpdateTime && (
-            <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
-              <div className="text-left space-y-1">
-                <div>🔄 Updated at {new Date(lastUpdateTime).toLocaleTimeString()}</div>
-                <div>📊 Items: {realtimeMenuItems.length} | 🌍 Translated: {realtimeMenuItems.filter(item => item.isTranslated).length} | 🔄 Partial: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length} | ✅ Complete: {realtimeMenuItems.filter(item => item.isComplete).length}</div>
-                <div>📋 Raw Categories: {Object.keys((stageData as StageData)?.categories || {}).length}</div>
-                <div>🌍 Translated Categories: {Object.keys((stageData as StageData)?.translatedCategories || {}).length}</div>
-                <div>🔄 Partial Results: {Object.keys((stageData as StageData)?.partialResults || {}).length}</div>
-                <div>📝 Partial Menu: {Object.keys((stageData as StageData)?.partialMenu || {}).length}</div>
-                {(stageData as any)?.processing_category && (
-                  <div>⚡ Processing: {(stageData as any).processing_category}</div>
-                )}
-                {realtimeMenuItems.length > 0 && (
-                  <div className="mt-1 text-xs text-gray-600">
-                    🎯 Sample Item States: {realtimeMenuItems.slice(0, 3).map((item, i) => 
-                      `${i+1}:${item.isTranslated?'T':''}${item.isPartiallyComplete?'P':''}${item.isComplete?'C':''}`
-                    ).join(' ')}
+          {/* リアルタイムデバッグ情報（強化版） */}
+          {isDebugVisible && lastUpdateTime && (() => {
+            const overallProgress = getOverallProgress();
+            return (
+              <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
+                <div className="text-left space-y-1">
+                  <div>🔄 Updated at {new Date(lastUpdateTime).toLocaleTimeString()}</div>
+                  
+                  {/* 全体進捗情報 */}
+                  {overallProgress && (
+                    <div className="bg-blue-50 p-1 rounded">
+                      📊 Overall Progress: {overallProgress.completedItems}✅ + {overallProgress.partialItems}🔄 / {overallProgress.totalItems} ({overallProgress.progressPercent}%)
+                    </div>
+                  )}
+                  
+                  {/* ストア状態 */}
+                  <div className="bg-green-50 p-1 rounded">
+                    🏪 Store State: Processing={storeStageData?.processingCategory || 'none'} | Completed={storeStageData?.completedCategories?.size || 0} categories
                   </div>
-                )}
+                  
+                  {/* 旧データとの比較 */}
+                  <div>📊 Legacy Items: {realtimeMenuItems.length} | 🌍 Translated: {realtimeMenuItems.filter(item => item.isTranslated).length} | 🔄 Partial: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length} | ✅ Complete: {realtimeMenuItems.filter(item => item.isComplete).length}</div>
+                  
+                  {/* データソース情報 */}
+                  <div>📋 Data Sources:</div>
+                  <div className="ml-2 space-y-0.5">
+                    <div>Raw Categories: {Object.keys((stageData as StageData)?.categories || {}).length}</div>
+                    <div>Translated Categories: {Object.keys((stageData as StageData)?.translatedCategories || {}).length}</div>
+                    <div>Realtime Partial: {Object.keys(storeStageData?.realtimePartialResults || {}).length}</div>
+                    <div>Legacy Partial Results: {Object.keys((stageData as StageData)?.partialResults || {}).length}</div>
+                    <div>Legacy Partial Menu: {Object.keys((stageData as StageData)?.partialMenu || {}).length}</div>
+                  </div>
+                  
+                  {/* 処理状況 */}
+                  {storeStageData?.processingCategory && (
+                    <div>⚡ Current Processing: {storeStageData.processingCategory}</div>
+                  )}
+                  
+                  {/* チャンク進捗 */}
+                  {storeStageData?.chunkProgress && (
+                    <div>📦 Chunk Progress: {storeStageData.chunkProgress.category} ({storeStageData.chunkProgress.completed}/{storeStageData.chunkProgress.total})</div>
+                  )}
+                  
+                  {/* 最新完了 */}
+                  {storeStageData?.categoryCompleted && (
+                    <div>🎯 Latest Completion: {storeStageData.categoryCompleted.name} ({storeStageData.categoryCompleted.items.length} items)</div>
+                  )}
+                  
+                  {/* サンプルアイテム状態 */}
+                  {realtimeMenuItems.length > 0 && (
+                    <div className="mt-1 text-xs text-gray-600">
+                      🎯 Sample Item States: {realtimeMenuItems.slice(0, 3).map((item, i) => 
+                        `${i+1}:${item.isTranslated?'T':''}${item.isPartiallyComplete?'P':''}${item.isComplete?'C':''}`
+                      ).join(' ')}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           
           {/* Stage3 詳細進捗表示 */}
           {currentStage === 3 && (
@@ -336,60 +375,99 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
             </div>
           )}
 
-          {/* Stage4 詳細進捗表示（ストリーミング強化） */}
-          {currentStage >= 4 && (
-            <div className="space-y-1">
-              <p className="text-xs sm:text-sm text-gray-600">
-                {realtimeMenuItems.filter(item => item.isComplete || item.isPartiallyComplete).length} of {realtimeMenuItems.length} items processed
-              </p>
-              <p className="text-xs text-gray-500">
-                Complete: {realtimeMenuItems.filter(item => item.isComplete).length} | 
-                Updating: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length}
-              </p>
-              
-              {/* リアルタイム処理状況 */}
-              {stageData && (stageData as any).processing_category && (
-                <div className="flex items-center justify-center space-x-2">
-                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                  <p className="text-xs text-green-600 font-medium">
-                    Detailing: {(stageData as any).processing_category}
-                  </p>
-                </div>
-              )}
-              
-              {/* ストリーミング更新の表示 */}
-              {stageData && (stageData as any).streaming_update && (
-                <div className="bg-green-50 rounded-lg p-2 border border-green-200">
-                  <p className="text-xs text-green-800 font-medium">
-                    📺 {(stageData as any).newly_processed_items?.length || 0} items updated in real-time
-                  </p>
-                  {(stageData as any).chunk_completed && (
-                    <p className="text-xs text-green-600">
-                      Progress: Chunk {(stageData as any).chunk_completed}
+          {/* Stage4 詳細進捗表示（リアルタイム強化） */}
+          {currentStage >= 4 && (() => {
+            const overallProgress = getOverallProgress();
+            const currentProcessing = storeStageData?.processingCategory || (stageData as any)?.processing_category;
+            const recentCompletion = storeStageData?.categoryCompleted;
+            const chunkProgress = storeStageData?.chunkProgress;
+            
+            return (
+              <div className="space-y-1">
+                {/* 全体進捗表示（リアルタイム） */}
+                {overallProgress ? (
+                  <div className="space-y-1">
+                    <p className="text-xs sm:text-sm text-gray-600">
+                      {overallProgress.completedItems + overallProgress.partialItems} of {overallProgress.totalItems} items processed
                     </p>
-                  )}
-                </div>
-              )}
-              
-              {/* カテゴリ完了の表示 */}
-              {stageData && (stageData as any).category_completion && (
-                <div className="bg-blue-50 rounded-lg p-2 border border-blue-200">
-                  <p className="text-xs text-blue-800 font-medium">
-                    🎯 {(stageData as any).category_completed} category completed!
+                    <p className="text-xs text-gray-500">
+                      Complete: {overallProgress.completedItems} | 
+                      Updating: {overallProgress.partialItems}
+                    </p>
+                    
+                    {/* 全体進捗バー */}
+                    <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
+                      <div 
+                        className="bg-gradient-to-r from-green-500 to-blue-500 h-1 rounded-full transition-all duration-500"
+                        style={{ width: `${overallProgress.progressPercent}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-xs text-green-600 font-medium">
+                      {overallProgress.progressPercent}% complete
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="text-xs sm:text-sm text-gray-600">
+                      {realtimeMenuItems.filter(item => item.isComplete || item.isPartiallyComplete).length} of {realtimeMenuItems.length} items processed
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Complete: {realtimeMenuItems.filter(item => item.isComplete).length} | 
+                      Updating: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length}
+                    </p>
+                  </div>
+                )}
+                
+                {/* 現在処理中のカテゴリ */}
+                {currentProcessing && (
+                  <div className="flex items-center justify-center space-x-2">
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                    <p className="text-xs text-green-600 font-medium">
+                      Detailing: {currentProcessing}
+                    </p>
+                    {chunkProgress && (
+                      <span className="text-xs text-gray-500">
+                        (chunk {chunkProgress.completed}/{chunkProgress.total})
+                      </span>
+                    )}
+                  </div>
+                )}
+                
+                {/* 最新カテゴリ完了通知 */}
+                {recentCompletion && Date.now() - recentCompletion.timestamp < 10000 && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="bg-green-50 rounded-lg p-2 border border-green-200"
+                  >
+                    <p className="text-xs text-green-800 font-medium">
+                      🎯 {recentCompletion.name} completed!
+                    </p>
+                    <p className="text-xs text-green-600">
+                      {recentCompletion.items.length} items with detailed descriptions
+                    </p>
+                  </motion.div>
+                )}
+                
+                {/* チャンク進捗の表示 */}
+                {chunkProgress && (
+                  <div className="bg-blue-50 rounded-lg p-2 border border-blue-200">
+                    <p className="text-xs text-blue-800 font-medium">
+                      📦 Processing {chunkProgress.category}: Chunk {chunkProgress.completed}/{chunkProgress.total}
+                    </p>
+                  </div>
+                )}
+                
+                {/* フォールバック進捗 */}
+                {!overallProgress && stageData && (stageData as any).progress_percent && (
+                  <p className="text-xs text-green-600">
+                    {Math.round((stageData as any).progress_percent)}% complete
                   </p>
-                  <p className="text-xs text-blue-600">
-                    {(stageData as any).category_items} items with detailed descriptions
-                  </p>
-                </div>
-              )}
-              
-              {stageData && (stageData as any).progress_percent && (
-                <p className="text-xs text-green-600">
-                  {Math.round((stageData as any).progress_percent)}% complete
-                </p>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })()}
 
           {/* Stage2 簡易表示 */}
           {currentStage === 2 && (

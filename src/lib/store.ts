@@ -31,6 +31,25 @@ interface StageData {
   stage3_completed?: boolean;
   show_translated_menu?: boolean;
   status?: string;
+  
+  // Stage 4リアルタイム部分結果管理
+  realtimePartialResults?: Record<string, unknown[]>;
+  completedCategories?: Set<string>;
+  processingCategory?: string;
+  
+  // チャンク処理状況
+  chunkProgress?: {
+    category: string;
+    completed: number;
+    total: number;
+  };
+  
+  // カテゴリ完了通知
+  categoryCompleted?: {
+    name: string;
+    items: unknown[];
+    timestamp: number;
+  };
 }
 
 // 統合された状態管理ストア
@@ -65,6 +84,27 @@ interface MenuStore extends TranslationState {
   getCurrentMenuData: () => Record<string, unknown[]> | null;
   getFilteredItems: () => unknown[];
   getCategoryList: () => string[];
+  
+  // Stage 4リアルタイム状態判定ユーティリティ
+  getMenuItemStatus: (item: any, categoryName: string) => {
+    isTranslated: boolean;
+    isComplete: boolean;
+    isPartiallyComplete: boolean;
+    isCurrentlyProcessing: boolean;
+  };
+  getCategoryProgress: (categoryName: string) => {
+    total: number;
+    completed: number;
+    partial: number;
+    processing: boolean;
+    isCompleted: boolean;
+  } | null;
+  getOverallProgress: () => {
+    totalItems: number;
+    completedItems: number;
+    partialItems: number;
+    progressPercent: number;
+  } | null;
 }
 
 // Emojiマッピング
@@ -168,15 +208,86 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
                 newStageData.show_translated_menu = true;
               }
             } else if (stage === 4) {
+              // 最終結果の処理
               const finalData = stageData.final_menu || stageData.finalMenu;
               if (finalData) {
                 newStageData.finalMenu = finalData as Record<string, unknown[]>;
               }
+              
+              // 部分結果の処理（従来）
               if (stageData.partial_results) {
                 newStageData.partialResults = stageData.partial_results as Record<string, unknown[]>;
               }
               if (stageData.partial_menu) {
                 newStageData.partialMenu = stageData.partial_menu as Record<string, unknown[]>;
+              }
+              
+              // リアルタイム部分結果の処理（新）
+              if (!newStageData.realtimePartialResults) {
+                newStageData.realtimePartialResults = {};
+              }
+              if (!newStageData.completedCategories) {
+                newStageData.completedCategories = new Set<string>();
+              }
+              
+              // 処理中カテゴリの更新
+              if (stageData.processing_category) {
+                newStageData.processingCategory = stageData.processing_category as string;
+              }
+              
+              // チャンク進捗の更新
+              if (stageData.chunk_progress) {
+                const chunkInfo = stageData.chunk_progress as string;
+                const match = chunkInfo.match(/(\d+)\/(\d+)/);
+                if (match && newStageData.processingCategory) {
+                  newStageData.chunkProgress = {
+                    category: newStageData.processingCategory,
+                    completed: parseInt(match[1]),
+                    total: parseInt(match[2])
+                  };
+                }
+              }
+              
+              // カテゴリ完了時の処理
+              if (stageData.category_completed) {
+                const categoryName = stageData.category_completed as string;
+                newStageData.completedCategories.add(categoryName);
+                
+                // 完了したカテゴリのアイテムを取得
+                let completedItems: unknown[] = [];
+                if (stageData.completed_category_items) {
+                  completedItems = stageData.completed_category_items as unknown[];
+                } else if (stageData.final_menu && (stageData.final_menu as any)[categoryName]) {
+                  completedItems = (stageData.final_menu as any)[categoryName];
+                }
+                
+                // リアルタイム部分結果に追加
+                if (completedItems.length > 0) {
+                  newStageData.realtimePartialResults[categoryName] = completedItems;
+                  
+                  // カテゴリ完了通知を設定
+                  newStageData.categoryCompleted = {
+                    name: categoryName,
+                    items: completedItems,
+                    timestamp: Date.now()
+                  };
+                  
+                  console.log(`🎯 [Store] Category completed: ${categoryName} (${completedItems.length} items)`);
+                }
+              }
+              
+              // チャンク結果の処理
+              if (stageData.chunk_result) {
+                const chunkData = stageData.chunk_result as unknown[];
+                if (newStageData.processingCategory && chunkData.length > 0) {
+                  // 既存のデータに追加
+                  if (!newStageData.realtimePartialResults[newStageData.processingCategory]) {
+                    newStageData.realtimePartialResults[newStageData.processingCategory] = [];
+                  }
+                  newStageData.realtimePartialResults[newStageData.processingCategory].push(...chunkData);
+                  
+                  console.log(`📦 [Store] Chunk result added: ${newStageData.processingCategory} (+${chunkData.length} items)`);
+                }
               }
             }
           }
@@ -220,7 +331,14 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
         { stage: 3, status: 'pending', message: '翻訳 - 英語に翻訳' },
         { stage: 4, status: 'pending', message: '詳細説明 - 詳細な説明を追加' },
       ],
-      stageData: {}
+      stageData: {
+        // リアルタイム部分結果もリセット
+        realtimePartialResults: {},
+        completedCategories: new Set<string>(),
+        processingCategory: undefined,
+        chunkProgress: undefined,
+        categoryCompleted: undefined
+      }
     });
   },
 
@@ -288,9 +406,36 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
       return stageData.finalMenu;
     }
     
-    // Stage 4進行中: 部分結果
-    if (currentStage === 4 && stageData.partialMenu) {
-      return stageData.partialMenu;
+    // Stage 4進行中: リアルタイム部分結果をマージして表示
+    if (currentStage === 4) {
+      // リアルタイム部分結果があればそれを基にマージ
+      if (stageData.realtimePartialResults && Object.keys(stageData.realtimePartialResults).length > 0) {
+        const baseData = stageData.translatedCategories || {};
+        const mergedData: Record<string, unknown[]> = {};
+        
+        // 全カテゴリをベースにマージ
+        for (const [category, items] of Object.entries(baseData)) {
+          // リアルタイム結果があればそれを使用、なければ翻訳結果を使用
+          if (stageData.realtimePartialResults[category]) {
+            mergedData[category] = stageData.realtimePartialResults[category];
+            console.log(`📊 [Store] Using realtime data for ${category}: ${stageData.realtimePartialResults[category].length} items`);
+          } else {
+            mergedData[category] = items;
+          }
+        }
+        
+        return mergedData;
+      }
+      
+      // リアルタイム結果がない場合は従来の部分結果を使用
+      if (stageData.partialMenu) {
+        return stageData.partialMenu;
+      }
+      
+      // 部分結果もない場合は翻訳結果を表示
+      if (stageData.translatedCategories && stageData.show_translated_menu) {
+        return stageData.translatedCategories;
+      }
     }
     
     // Stage 3: 翻訳版
@@ -327,6 +472,88 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
   getCategoryList: () => {
     const menuData = get().getCurrentMenuData();
     return menuData ? Object.keys(menuData) : [];
+  },
+
+  // === Stage 4リアルタイム状態判定ユーティリティ ===
+  getMenuItemStatus: (item: any, categoryName: string) => {
+    const { stageData, currentStage } = get();
+    
+    // Stage 4未満では基本状態のみ
+    if (currentStage < 4) {
+      return {
+        isTranslated: currentStage >= 3 && Boolean(item.english_name),
+        isComplete: false,
+        isPartiallyComplete: false,
+        isCurrentlyProcessing: false
+      };
+    }
+    
+    // Stage 4での詳細判定
+    const isComplete = Boolean(item.description && item.description !== 'N/A' && item.description.length > 20);
+    const isCurrentlyProcessing = stageData.processingCategory === categoryName;
+    const isCategoryCompleted = stageData.completedCategories?.has(categoryName) || false;
+    
+    return {
+      isTranslated: Boolean(item.english_name),
+      isComplete: isComplete && isCategoryCompleted,
+      isPartiallyComplete: Boolean(item.description) && !isComplete,
+      isCurrentlyProcessing: isCurrentlyProcessing && !isCategoryCompleted
+    };
+  },
+
+  getCategoryProgress: (categoryName: string) => {
+    const { stageData, currentStage } = get();
+    
+    if (currentStage < 4) return null;
+    
+    const menuData = get().getCurrentMenuData();
+    if (!menuData || !menuData[categoryName]) return null;
+    
+    const items = menuData[categoryName];
+    const total = items.length;
+    let completed = 0;
+    let partial = 0;
+    
+    items.forEach(item => {
+      const status = get().getMenuItemStatus(item, categoryName);
+      if (status.isComplete) completed++;
+      else if (status.isPartiallyComplete) partial++;
+    });
+    
+    return {
+      total,
+      completed,
+      partial,
+      processing: stageData.processingCategory === categoryName,
+      isCompleted: stageData.completedCategories?.has(categoryName) || false
+    };
+  },
+
+  getOverallProgress: () => {
+    const { currentStage } = get();
+    const menuData = get().getCurrentMenuData();
+    
+    if (!menuData || currentStage < 4) return null;
+    
+    let totalItems = 0;
+    let completedItems = 0;
+    let partialItems = 0;
+    
+    Object.keys(menuData).forEach(categoryName => {
+      const progress = get().getCategoryProgress(categoryName);
+      if (progress) {
+        totalItems += progress.total;
+        completedItems += progress.completed;
+        partialItems += progress.partial;
+      }
+    });
+    
+    return {
+      totalItems,
+      completedItems,
+      partialItems,
+      progressPercent: totalItems > 0 ? Math.round(((completedItems + partialItems * 0.5) / totalItems) * 100) : 0
+    };
   },
 }));
 

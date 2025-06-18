@@ -35,8 +35,8 @@ const ProcessPage = () => {
   }, [selectedFile, isLoading, currentStage, translateMenu, router]);
 
   useEffect(() => {
-    // Stage 3以降はメニューページに遷移
-    if (currentStage >= 3) {
+    // Stage 2（カテゴライズ）完了後はメニューページに遷移
+    if (currentStage >= 2) {
       router.push('/menu');
     }
   }, [currentStage, router]);
@@ -198,6 +198,7 @@ const ProcessPage = () => {
                 <p className="font-medium">Menu Organization</p>
                 <p className="text-sm text-gray-600">
                   Intelligently categorizing and structuring the detected menu items
+                  {currentStage >= 2 && ' → Proceeding to menu page'}
                 </p>
               </div>
             </div>
