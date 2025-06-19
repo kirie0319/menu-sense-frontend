@@ -19,6 +19,10 @@ const ProgressStages = () => {
         return <Globe {...iconProps} />;
       case 4:
         return <BookOpen {...iconProps} />;
+      case 5:
+        return <div className="h-5 w-5 text-lg">🎨</div>;
+      case 6:
+        return <div className="h-5 w-5 text-lg">✅</div>;
       default:
         return <Clock {...iconProps} />;
     }

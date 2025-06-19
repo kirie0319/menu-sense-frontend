@@ -35,12 +35,55 @@ export const MenuItemsGrid: React.FC = () => {
     ui,
     showItemDetail,
     toggleFavorite,
-    getFilteredItems
+    getFilteredItems,
+    getGeneratedImageUrl,
+    hasGeneratedImages
   } = useMenuStore();
 
   const [newItemAnimations, setNewItemAnimations] = useState<Set<string>>(new Set());
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
+  const [imageLoading, setImageLoading] = useState<Set<string>>(new Set());
 
   const filteredItems = getFilteredItems();
+
+  // 画像生成状況のデバッグ情報
+  useEffect(() => {
+    if (hasGeneratedImages()) {
+      console.log(`🖼️ [MenuItemsGrid] Image generation detected, checking mappings...`);
+      filteredItems.forEach((item, index) => {
+        const itemObj = item as Record<string, unknown>;
+        const itemName = String(itemObj.english_name || itemObj.name_english || itemObj.name || '');
+        const imageUrl = getGeneratedImageUrl(itemObj);
+        
+        console.log(`🔍 [MenuItemsGrid] Item ${index + 1}: "${itemName}" → ${imageUrl ? 'IMAGE FOUND' : 'NO IMAGE'}`, {
+          itemName,
+          imageUrl,
+          itemData: itemObj
+        });
+      });
+    }
+  }, [filteredItems, hasGeneratedImages, getGeneratedImageUrl]);
+
+  const handleImageLoad = (itemId: string) => {
+    setImageLoading(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(itemId);
+      return newSet;
+    });
+  };
+
+  const handleImageError = (itemId: string) => {
+    setImageErrors(prev => new Set(prev).add(itemId));
+    setImageLoading(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(itemId);
+      return newSet;
+    });
+  };
+
+  const handleImageLoadStart = (itemId: string) => {
+    setImageLoading(prev => new Set(prev).add(itemId));
+  };
 
   if (filteredItems.length === 0) {
     return (
@@ -87,7 +130,11 @@ export const MenuItemsGrid: React.FC = () => {
             const numPrice = parseInt(cleanPrice, 10);
             return isNaN(numPrice) ? 0 : numPrice;
           };
-          const image = String(itemObj.image || '🍽️');
+          const defaultEmoji = String(itemObj.image || '🍽️');
+          const generatedImageUrl = getGeneratedImageUrl(itemObj);
+          const hasImage = hasGeneratedImages() && generatedImageUrl && !imageErrors.has(itemId);
+          const isLoadingImage = imageLoading.has(itemId);
+          
           const tags = Array.isArray(itemObj.tags) ? itemObj.tags.map(String) : ['Japanese'];
           const spiceLevel = Number(itemObj.spice_level || itemObj.spiceLevel || 0);
           const isFavorite = ui.favorites.has(itemId);
@@ -197,8 +244,28 @@ export const MenuItemsGrid: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="w-16 h-16 md:w-24 md:h-24 bg-gradient-to-br from-orange-100 to-yellow-100 rounded-xl md:rounded-2xl flex items-center justify-center text-2xl md:text-4xl flex-shrink-0 group-hover:scale-105 transition-all duration-300">
-                    {image}
+                  <div className="w-16 h-16 md:w-24 md:h-24 bg-gradient-to-br from-orange-100 to-yellow-100 rounded-xl md:rounded-2xl flex items-center justify-center text-2xl md:text-4xl flex-shrink-0 group-hover:scale-105 transition-all duration-300 relative overflow-hidden">
+                    {hasImage ? (
+                      <>
+                        {isLoadingImage && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-orange-50">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-500"></div>
+                          </div>
+                        )}
+                        <img
+                          src={generatedImageUrl}
+                          alt={name}
+                          className={`w-full h-full object-cover rounded-xl md:rounded-2xl transition-opacity duration-300 ${
+                            isLoadingImage ? 'opacity-0' : 'opacity-100'
+                          }`}
+                          onLoad={() => handleImageLoad(itemId)}
+                          onError={() => handleImageError(itemId)}
+                          onLoadStart={() => handleImageLoadStart(itemId)}
+                        />
+                      </>
+                    ) : (
+                      <span className="text-2xl md:text-4xl">{defaultEmoji}</span>
+                    )}
                   </div>
                 </div>
               </div>

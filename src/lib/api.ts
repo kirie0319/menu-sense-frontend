@@ -347,10 +347,45 @@ export class MenuTranslationApi {
         
         const { stage, status, message, ...data } = progressData;
         
+        // 接続警告メッセージ（Stage 0）を特別処理
+        if (stage === 0 && progressData.connection_warning) {
+          console.warn(`⚠️ [SSE] Connection warning received:`, {
+            message: message,
+            currentStage: currentStage,
+            data: data
+          });
+          // 接続警告はステージ遷移として扱わない
+          return;
+        }
+        
+        // 受信データの詳細ログ（Stage 5の問題を特定するため）
+        if (stage === 5 || stage === 0 || (currentStage === 5 && stage !== 5)) {
+          console.log(`🔍 [SSE] Critical stage data received:`, {
+            receivedStage: stage,
+            currentStage: currentStage,
+            status: status,
+            message: message,
+            rawProgressData: progressData,
+            dataKeys: Object.keys(data),
+            timestamp: new Date().toISOString()
+          });
+        }
+        
         // Stage変更追跡
         if (stage !== currentStage) {
           const stageDuration = currentStage > 0 ? Date.now() - (stage4StartTime || lastHeartbeat) : 0;
           console.log(`[SSE] 🔄 Stage transition: ${currentStage} → ${stage} (previous stage took ${stageDuration}ms)`);
+          
+          // Stage 5からの異常な遷移を詳細追跡
+          if (currentStage === 5 && stage !== 5 && stage !== 6) {
+            console.warn(`⚠️ [SSE] ABNORMAL Stage transition from 5 to ${stage}!`, {
+              previousStage: currentStage,
+              newStage: stage,
+              status: status,
+              message: message,
+              fullData: progressData
+            });
+          }
           
           if (stage === 4 && currentStage !== 4) {
             stage4StartTime = Date.now();
@@ -434,8 +469,8 @@ export class MenuTranslationApi {
           finalResult.menu_items = menuItems;
         }
         
-        // 完了判定
-        if ((stage === 4 && status === 'completed') || (stage === 5 && status === 'completed')) {
+        // 完了判定（Stage 6の完了まで待つ）
+        if (stage === 6 && status === 'completed') {
           console.log('🎉 Translation process completed!');
           cleanup('Translation completed');
           

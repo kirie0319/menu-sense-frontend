@@ -50,6 +50,17 @@ interface StageData {
     items: unknown[];
     timestamp: number;
   };
+  
+  // Stage 5: 画像生成関連
+  imagesGenerated?: Record<string, Array<{
+    english_name?: string;
+    image_url?: string;
+    prompt_used?: string;
+    error?: string;
+    generation_success?: boolean;
+  }>>;
+  finalMenuWithImages?: Record<string, unknown[]>;
+  imageGenerationSkipped?: string;
 }
 
 // 統合された状態管理ストア
@@ -105,6 +116,10 @@ interface MenuStore extends TranslationState {
     partialItems: number;
     progressPercent: number;
   } | null;
+
+  // === 画像生成関連のヘルパー ===
+  getGeneratedImageUrl: (item: any) => string | null;
+  hasGeneratedImages: () => boolean;
 }
 
 // Emojiマッピング
@@ -136,6 +151,8 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
     { stage: 2, status: 'pending', message: 'カテゴリ分析 - 日本語メニューを分析' },
     { stage: 3, status: 'pending', message: '翻訳 - 英語に翻訳' },
     { stage: 4, status: 'pending', message: '詳細説明 - 詳細な説明を追加' },
+    { stage: 5, status: 'pending', message: '画像生成 - AI画像を生成' },
+    { stage: 6, status: 'pending', message: '完了 - 処理完了' },
   ],
   stageData: {},
   sessionId: null,
@@ -289,6 +306,64 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
                   console.log(`📦 [Store] Chunk result added: ${newStageData.processingCategory} (+${chunkData.length} items)`);
                 }
               }
+            } else if (stage === 5) {
+              // Stage 5: 画像生成の処理
+              console.log(`🎨 [Store] Stage 5 data received:`, {
+                stage: stage,
+                status: status,
+                message: message,
+                dataKeys: Object.keys(data || {}),
+                fullData: data
+              });
+              
+              if ((data as any).images_generated) {
+                console.log(`🔍 [Store] images_generated raw data:`, (data as any).images_generated);
+                console.log(`🔍 [Store] images_generated type:`, typeof (data as any).images_generated);
+                console.log(`🔍 [Store] images_generated keys:`, Object.keys((data as any).images_generated));
+                
+                // データの詳細構造を確認
+                for (const [key, value] of Object.entries((data as any).images_generated)) {
+                  console.log(`🔍 [Store] images_generated["${key}"]:`, value);
+                  console.log(`🔍 [Store] Value type:`, typeof value);
+                  if (typeof value === 'object' && value !== null) {
+                    console.log(`🔍 [Store] Object keys:`, Object.keys(value));
+                  }
+                }
+                
+                newStageData.imagesGenerated = (data as any).images_generated as Record<string, Array<{
+                  english_name?: string;
+                  image_url?: string;
+                  prompt_used?: string;
+                  error?: string;
+                  generation_success?: boolean;
+                }>>;
+                console.log(`🎨 [Store] Images generated: ${Object.keys((data as any).images_generated).length} items`);
+                console.log(`🎨 [Store] Image details:`, (data as any).images_generated);
+              }
+              if ((data as any).final_menu_with_images) {
+                newStageData.finalMenuWithImages = (data as any).final_menu_with_images as Record<string, unknown[]>;
+                console.log(`🖼️ [Store] Final menu with images received`);
+                console.log(`🖼️ [Store] Final menu categories:`, Object.keys((data as any).final_menu_with_images));
+              }
+              if ((data as any).skipped_reason) {
+                newStageData.imageGenerationSkipped = (data as any).skipped_reason as string;
+                console.log(`⚠️ [Store] Image generation skipped: ${(data as any).skipped_reason}`);
+              }
+              
+              // Stage 5の他のフィールドもチェック
+              if ((data as any).processing_category) {
+                console.log(`📂 [Store] Stage 5 processing category: ${(data as any).processing_category}`);
+              }
+              if ((data as any).category_completed) {
+                console.log(`✅ [Store] Stage 5 category completed: ${(data as any).category_completed}`);
+              }
+              if ((data as any).chunk_progress) {
+                console.log(`📦 [Store] Stage 5 chunk progress: ${(data as any).chunk_progress}`);
+              }
+            } else if (stage === 6) {
+              // Stage 6: 完了処理
+              console.log(`✅ [Store] Process completed at Stage 6`);
+              console.log(`✅ [Store] Stage 6 data:`, data);
             }
           }
           
@@ -330,6 +405,8 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
         { stage: 2, status: 'pending', message: 'カテゴリ分析 - 日本語メニューを分析' },
         { stage: 3, status: 'pending', message: '翻訳 - 英語に翻訳' },
         { stage: 4, status: 'pending', message: '詳細説明 - 詳細な説明を追加' },
+        { stage: 5, status: 'pending', message: '画像生成 - AI画像を生成' },
+        { stage: 6, status: 'pending', message: '完了 - 処理完了' },
       ],
       stageData: {
         // リアルタイム部分結果もリセット
@@ -400,6 +477,11 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
 
   getCurrentMenuData: () => {
     const { stageData, currentStage } = get();
+    
+    // Stage 5: 画像付き完全版
+    if (currentStage >= 5 && stageData.finalMenuWithImages) {
+      return stageData.finalMenuWithImages;
+    }
     
     // Stage 4: 完全版（詳細説明付き）
     if (currentStage >= 4 && stageData.finalMenu) {
@@ -554,6 +636,94 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
       partialItems,
       progressPercent: totalItems > 0 ? Math.round(((completedItems + partialItems * 0.5) / totalItems) * 100) : 0
     };
+  },
+
+  // === 画像生成関連のヘルパー ===
+  getGeneratedImageUrl: (item: any) => {
+    const { stageData } = get();
+    
+    // Stage 5の画像が生成されていない場合はnull
+    if (!stageData.imagesGenerated) {
+      console.log(`🖼️ [Store] No images generated yet`);
+      return null;
+    }
+    
+    // アイテム名から画像ファイル名を推測
+    const itemName = item.english_name || item.name_english || item.name || '';
+    if (!itemName) {
+      console.log(`🖼️ [Store] No item name found for:`, item);
+      return null;
+    }
+    
+    // 画像マッピングから対応する画像パスを探す
+    const normalizedItemName = itemName.toLowerCase().replace(/\s+/g, '_');
+    
+    console.log(`🔍 [Store] Looking for image: "${itemName}" (normalized: "${normalizedItemName}")`);
+    console.log(`🔍 [Store] Available categories:`, Object.keys(stageData.imagesGenerated));
+    
+    // カテゴリごとに配列を検索
+    for (const [categoryName, categoryImages] of Object.entries(stageData.imagesGenerated)) {
+      if (Array.isArray(categoryImages)) {
+        console.log(`🔍 [Store] Checking category: "${categoryName}" (${categoryImages.length} items)`);
+        
+        for (let i = 0; i < categoryImages.length; i++) {
+          const imageItem = categoryImages[i] as any;
+          const imageItemName = imageItem.english_name || imageItem.name || imageItem.item_name || '';
+          const imageUrl = imageItem.image_url || imageItem.url || imageItem.path || '';
+          
+          if (imageItemName && imageUrl) {
+            const normalizedImageName = imageItemName.toLowerCase().replace(/\s+/g, '_');
+            console.log(`🔍 [Store] Comparing "${normalizedItemName}" with "${normalizedImageName}" (${categoryName}[${i}])`);
+            
+                         // 名前の一致チェック（完全一致優先、部分一致もサポート）
+             if (normalizedImageName === normalizedItemName || 
+                 normalizedImageName.includes(normalizedItemName) || 
+                 normalizedItemName.includes(normalizedImageName)) {
+               
+               // 静的ファイル配信用のURLを構築（メインルートの /uploads/ を使用）
+               const baseUrl = 'http://localhost:8000';
+               // imageUrl が /uploads/ で始まる場合はそのまま使用、そうでなければ /uploads/ を追加
+               const imagePath = imageUrl.startsWith('/uploads/') ? imageUrl : `/uploads${imageUrl}`;
+               const fullUrl = `${baseUrl}${imagePath}`;
+               console.log(`✅ [Store] Image match found: "${itemName}" → "${fullUrl}"`);
+               return fullUrl;
+             }
+          } else {
+            console.log(`🔍 [Store] Invalid image item in ${categoryName}[${i}]:`, imageItem);
+          }
+        }
+      } else {
+        console.log(`🔍 [Store] ${categoryName} is not an array:`, typeof categoryImages);
+      }
+    }
+    
+    console.log(`❌ [Store] No image match found for: "${itemName}"`);
+    return null;
+  },
+
+  hasGeneratedImages: () => {
+    const { stageData } = get();
+    
+    if (!stageData.imagesGenerated || Object.keys(stageData.imagesGenerated).length === 0) {
+      return false;
+    }
+    
+    // カテゴリごとに配列をチェック
+    for (const [categoryName, categoryImages] of Object.entries(stageData.imagesGenerated)) {
+      if (Array.isArray(categoryImages) && categoryImages.length > 0) {
+        // 有効な画像アイテムがあるかチェック
+        for (const imageItem of categoryImages) {
+          const imageUrl = (imageItem as any).image_url || (imageItem as any).url || (imageItem as any).path;
+          if (imageUrl) {
+            console.log(`🖼️ [Store] Images found in category: ${categoryName}`);
+            return true;
+          }
+        }
+      }
+    }
+    
+    console.log(`🖼️ [Store] No valid images found`);
+    return false;
   },
 }));
 
