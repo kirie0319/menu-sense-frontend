@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMenuStore } from '@/lib/store';
+import { useUIStore } from '@/lib/stores/uiStore';
+import { useProgressStore } from '@/lib/stores/progressStore';
 import { MenuCategories } from './menu/MenuCategories';
 import { MenuItemsGrid } from './menu/MenuItemsGrid';
 import { MenuItemDetail } from './menu/MenuItemDetail';
@@ -22,13 +24,17 @@ export const MenuPage: React.FC<MenuPageProps> = ({
   file: externalFile, 
   sessionId: externalSessionId 
 }) => {
-  // Zustand store state and functions
+  // UI関連は新しいUIStoreから取得
+  const { ui } = useUIStore();
+  
+  // Progress関連は新しいProgressStoreから取得
+  const { currentStage } = useProgressStore();
+  
+  // データ関連は既存ストアから継続取得
   const {
     selectedFile,
     error,
-    ui,
     isLoading,
-    currentStage,
     // Actions
     setFile,
     translateMenu,

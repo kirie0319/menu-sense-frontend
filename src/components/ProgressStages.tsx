@@ -2,10 +2,10 @@
 
 import { motion } from 'framer-motion';
 import { Check, Clock, AlertCircle, Search, FileText, Globe, BookOpen } from 'lucide-react';
-import { useTranslationStore } from '@/lib/store';
+import { useProgressStore } from '@/lib/stores/progressStore';
 
 const ProgressStages = () => {
-  const { progressStages } = useTranslationStore();
+  const { progressStages } = useProgressStore();
 
   const getStageIcon = (stage: number) => {
     const iconProps = { className: "h-5 w-5" };

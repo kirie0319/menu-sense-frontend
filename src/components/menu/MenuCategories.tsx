@@ -3,13 +3,15 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { useMenuStore } from '@/lib/store';
+import { useUIStore } from '@/lib/stores/uiStore';
 
 export const MenuCategories: React.FC = () => {
+  // UI関連は新しいUIStoreから取得
+  const { ui, setSelectedCategory } = useUIStore();
+  
+  // データ関連は既存ストアから継続取得
   const { 
-    ui,
-    setSelectedCategory,
     getCategoryList,
-    getEmojiForCategory,
     getCurrentMenuData
   } = useMenuStore();
 

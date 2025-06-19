@@ -3,6 +3,7 @@
 import React from 'react';
 import { ArrowLeft, Home } from 'lucide-react';
 import { useMenuStore } from '@/lib/store';
+import { useProgressStore } from '@/lib/stores/progressStore';
 
 interface MenuHeaderProps {
   onBackToHome: () => void;
@@ -15,15 +16,17 @@ export const MenuHeader: React.FC<MenuHeaderProps> = ({
   onNavigateToProcess,
   debugInfo
 }) => {
+  // メインストアから基本状態とUI機能を取得
   const { 
     selectedFile,
     isLoading,
-    currentStage,
-    progressStages,
     ui,
     toggleDebugMonitor,
     toggleRawMenu
   } = useMenuStore();
+
+  // Progress関連は新しいProgressStoreから
+  const { currentStage, progressStages } = useProgressStore();
 
   return (
     <header className="fixed top-0 left-0 right-0 bg-white shadow-lg border-b border-gray-100 z-40">

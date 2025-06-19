@@ -3,16 +3,19 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { useMenuStore } from '@/lib/store';
+import { useProgressStore } from '@/lib/stores/progressStore';
 
 export const DebugPanel: React.FC = () => {
+  // UI関連は引き続きメインストアから
   const {
     ui,
-    currentStage,
-    stageData,
     getCurrentMenuData,
     getFilteredItems,
     getCategoryList
   } = useMenuStore();
+
+  // Progress関連は新しいProgressStoreから
+  const { currentStage, stageData } = useProgressStore();
 
   const menuData = getCurrentMenuData();
   const filteredItems = getFilteredItems();

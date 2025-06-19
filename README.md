@@ -31,6 +31,11 @@ A modern React/Next.js frontend application for translating Japanese restaurant 
 - **React Dropzone** - Drag & drop file upload
 - **clsx** - Conditional className utility
 
+### Testing & Quality
+- **Jest** - Test runner and framework
+- **Testing Library** - React component testing utilities
+- **TypeScript** - Compile-time type checking
+
 ## 📋 Prerequisites
 
 - Node.js 18.0 or higher
@@ -137,6 +142,71 @@ npm start
 ```bash
 npm run lint
 ```
+
+### Testing
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode (for development)
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+
+# Run tests in CI environment
+npm run test:ci
+```
+
+## 🧪 Testing
+
+This project includes comprehensive tests for all major components and functionality:
+
+### Test Coverage
+- **Store Tests**: State management, progress tracking, data filtering
+- **API Tests**: HTTP requests, SSE connections, error handling  
+- **Component Tests**: UI interactions, file upload, responsive design
+- **Integration Tests**: End-to-end user workflows
+
+### Test Structure
+```
+__tests__/
+├── store/                 # Zustand store tests
+│   └── menuStore.test.ts
+├── api/                   # API layer tests  
+│   └── translationApi.test.ts
+├── components/            # React component tests
+│   └── HomePage.test.tsx
+└── utils/                 # Test utilities
+    └── testHelpers.ts
+```
+
+### Testing Technologies
+- **Jest** - Test runner and framework
+- **@testing-library/react** - React component testing
+- **@testing-library/user-event** - User interaction simulation
+- **@testing-library/jest-dom** - Additional Jest matchers
+
+### Running Specific Tests
+```bash
+# Run store tests only
+npm test store
+
+# Run component tests only  
+npm test components
+
+# Run API tests only
+npm test api
+
+# Run tests matching a pattern
+npm test HomePage
+```
+
+### Test Quality Standards
+- **70%+ Coverage**: Minimum code coverage requirement
+- **Unit Tests**: All core functions and components
+- **Integration Tests**: Critical user workflows
+- **Error Scenarios**: Comprehensive error handling tests
 
 ## 🤝 Backend Integration
 

@@ -4,14 +4,14 @@ import React from 'react';
 import { X, Heart, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMenuStore } from '@/lib/store';
+import { useUIStore } from '@/lib/stores/uiStore';
 
 export const MenuItemDetail: React.FC = () => {
-  const { 
-    ui,
-    hideItemDetail,
-    toggleFavorite,
-    getFilteredItems
-  } = useMenuStore();
+  // UI関連は新しいUIStoreから取得
+  const { ui, hideItemDetail, toggleFavorite } = useUIStore();
+  
+  // データ関連は既存ストアから継続取得
+  const { getFilteredItems } = useMenuStore();
 
   const filteredItems = getFilteredItems();
   const selectedItem = filteredItems.find((item, index) => {

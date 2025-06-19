@@ -3,6 +3,7 @@
 import React from 'react';
 import { Category, StageData, MenuCategoryListProps } from '@/types';
 import { useMenuStore } from '@/lib/store';
+import { useProgressStore } from '@/lib/stores/progressStore';
 
 const MenuCategoryList: React.FC<MenuCategoryListProps> = ({
   categories,
@@ -11,7 +12,8 @@ const MenuCategoryList: React.FC<MenuCategoryListProps> = ({
   currentStage,
   stageData
 }) => {
-  const { getCategoryProgress, getOverallProgress } = useMenuStore();
+  // Progress関連は新しいProgressStoreから
+  const { getCategoryProgress, getOverallProgress } = useProgressStore();
 
   const getButtonStyle = (category: Category) => {
     if (selectedCategory === category.id) {

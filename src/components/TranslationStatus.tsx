@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, Camera, CheckCircle, Brain, Sparkles } from 'lucide-react';
 import { MenuItem, StageData, TranslationStatusProps } from '@/types';
 import { useMenuStore } from '@/lib/store';
+import { useProgressStore } from '@/lib/stores/progressStore';
 
 // ローディングスピナーコンポーネント
 const LoadingSpinner = ({ color = "orange" }: { color?: string }) => (
@@ -35,7 +36,8 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
   isDebugVisible = false,
   lastUpdateTime
 }) => {
-  const { getOverallProgress, stageData: storeStageData } = useMenuStore();
+  // Progress関連は新しいProgressStoreから取得
+  const { getOverallProgress, stageData: storeStageData } = useProgressStore();
   // 分析画面のステータス表示
   if (isAnalyzing && currentStage <= 2) {
     return (

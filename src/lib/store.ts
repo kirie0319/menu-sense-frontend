@@ -1,76 +1,13 @@
-// 統合された軽量ストア - 以前の469行から大幅削減
+// 統合された軽量ストア - Progress Store 統合版
 import { create } from 'zustand';
 import { TranslationState } from '@/types';
-import { MenuTranslationApi, API_BASE_URL } from './api';
+import { MenuTranslationApi } from './api';
+import { useProgressStore } from './stores/progressStore';
+import { useDataStore } from './stores/dataStore';
+import { UIState } from './stores/uiStore';
 
-// 進捗ステージの型定義
-interface ProgressStage {
-  stage: number;
-  status: 'pending' | 'active' | 'completed' | 'error';
-  message: string;
-}
-
-// UI状態の型定義
-interface UIState {
-  selectedCategory: string;
-  showItemDetail: boolean;
-  selectedItemId: string | null;
-  favorites: Set<string>;
-  showDebugMonitor: boolean;
-  showRawMenu: boolean;
-  currentView: 'categories' | 'items' | 'generated';
-}
-
-// ステージデータの型定義
-interface StageData {
-  categories?: Record<string, unknown[]>;
-  translatedCategories?: Record<string, unknown[]>;
-  finalMenu?: Record<string, unknown[]>;
-  partialResults?: Record<string, unknown[]>;
-  partialMenu?: Record<string, unknown[]>;
-  stage3_completed?: boolean;
-  show_translated_menu?: boolean;
-  status?: string;
-  
-  // Stage 4リアルタイム部分結果管理
-  realtimePartialResults?: Record<string, unknown[]>;
-  completedCategories?: Set<string>;
-  processingCategory?: string;
-  
-  // チャンク処理状況
-  chunkProgress?: {
-    category: string;
-    completed: number;
-    total: number;
-  };
-  
-  // カテゴリ完了通知
-  categoryCompleted?: {
-    name: string;
-    items: unknown[];
-    timestamp: number;
-  };
-  
-  // Stage 5: 画像生成関連
-  imagesGenerated?: Record<string, Array<{
-    english_name?: string;
-    image_url?: string;
-    prompt_used?: string;
-    error?: string;
-    generation_success?: boolean;
-  }>>;
-  finalMenuWithImages?: Record<string, unknown[]>;
-  imageGenerationSkipped?: string;
-}
-
-// 統合された状態管理ストア
+// 統合された状態管理ストア (Progress機能をProgressStoreに移管)
 interface MenuStore extends TranslationState {
-  // 進捗管理
-  currentStage: number;
-  progressStages: ProgressStage[];
-  stageData: StageData;
-  sessionId: string | null;
-  
   // UI状態
   ui: UIState;
   
@@ -79,7 +16,6 @@ interface MenuStore extends TranslationState {
   translateMenu: (existingSessionId?: string) => Promise<void>;
   clearResult: () => void;
   clearError: () => void;
-  resetProgress: () => void;
   
   // UI Actions
   setSelectedCategory: (category: string) => void;
@@ -96,46 +32,12 @@ interface MenuStore extends TranslationState {
   getFilteredItems: () => unknown[];
   getCategoryList: () => string[];
   
-  // Stage 4リアルタイム状態判定ユーティリティ
-  getMenuItemStatus: (item: any, categoryName: string) => {
-    isTranslated: boolean;
-    isComplete: boolean;
-    isPartiallyComplete: boolean;
-    isCurrentlyProcessing: boolean;
-  };
-  getCategoryProgress: (categoryName: string) => {
-    total: number;
-    completed: number;
-    partial: number;
-    processing: boolean;
-    isCompleted: boolean;
-  } | null;
-  getOverallProgress: () => {
-    totalItems: number;
-    completedItems: number;
-    partialItems: number;
-    progressPercent: number;
-  } | null;
-
   // === 画像生成関連のヘルパー ===
   getGeneratedImageUrl: (item: any) => string | null;
   hasGeneratedImages: () => boolean;
 }
 
-// Emojiマッピング
-const categoryEmojiMap: Record<string, string> = {
-  'appetizers': '🥗', 'starters': '🥗', '前菜': '🥗', 'サラダ': '🥗',
-  'main': '🍖', 'mains': '🍖', 'entrees': '🍖', 'メイン': '🍖', '主菜': '🍖',
-  'desserts': '🍰', 'dessert': '🍰', 'sweets': '🍰', 'デザート': '🍰', '甘味': '🍰',
-  'drinks': '🥤', 'beverages': '🥤', 'cocktails': '🍸', '飲み物': '🥤', 'ドリンク': '🥤',
-  'sushi': '🍣', '寿司': '🍣', 'sashimi': '🍣', '刺身': '🍣',
-  'noodles': '🍜', 'ramen': '🍜', 'udon': '🍜', '麺類': '🍜', 'ラーメン': '🍜',
-  'rice': '🍚', 'fried rice': '🍚', 'ご飯': '🍚', '丼': '🍚',
-  'soup': '🍲', 'soups': '🍲', 'スープ': '🍲', '汁物': '🍲',
-  'grilled': '🔥', 'bbq': '🔥', 'barbecue': '🔥', '焼き物': '🔥', 'グリル': '🔥',
-  'fried': '🍤', 'tempura': '🍤', 'katsu': '🍤', '揚げ物': '🍤', '天ぷら': '🍤',
-  'hot pot': '🍲', 'shabu': '🍲', '鍋': '🍲', 'しゃぶしゃぶ': '🍲'
-};
+// Emojiマッピング（Data Storeに移動済み）
 
 export const useMenuStore = create<MenuStore>((set, get) => ({
   // 初期状態
@@ -143,19 +45,6 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
   result: null,
   error: null,
   selectedFile: null,
-  
-  // 進捗関連の初期状態
-  currentStage: 0,
-  progressStages: [
-    { stage: 1, status: 'pending', message: 'OCR - 画像からテキストを抽出' },
-    { stage: 2, status: 'pending', message: 'カテゴリ分析 - 日本語メニューを分析' },
-    { stage: 3, status: 'pending', message: '翻訳 - 英語に翻訳' },
-    { stage: 4, status: 'pending', message: '詳細説明 - 詳細な説明を追加' },
-    { stage: 5, status: 'pending', message: '画像生成 - AI画像を生成' },
-    { stage: 6, status: 'pending', message: '完了 - 処理完了' },
-  ],
-  stageData: {},
-  sessionId: null,
   
   // UI初期状態
   ui: {
@@ -172,12 +61,14 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
   setFile: (file: File | null) => {
     set({ selectedFile: file, error: null });
     if (file) {
-      get().resetProgress();
+      // Progress Store のリセットを使用
+      useProgressStore.getState().resetProgress();
     }
   },
 
   translateMenu: async (existingSessionId?: string) => {
-    const { selectedFile, sessionId, isLoading } = get();
+    const { selectedFile, isLoading } = get();
+    const { sessionId } = useProgressStore.getState();
     
     if (!selectedFile) {
       set({ error: 'Please select a file first' });
@@ -194,191 +85,22 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
     const useSessionId = existingSessionId || sessionId || undefined;
 
     set({ isLoading: true, error: null });
-    get().resetProgress();
+    useProgressStore.getState().resetProgress();
 
     try {
       const result = await MenuTranslationApi.translateMenuWithProgress(
         selectedFile,
         (stage: number, status: string, message: string, data?: unknown) => {
-          // 進捗更新ロジック（簡略化）
-          const currentState = get();
-          const newProgressStages = currentState.progressStages.map((s) =>
-            s.stage === stage
-              ? { ...s, status: status as 'pending' | 'active' | 'completed' | 'error', message }
-              : s
-          );
-          
-          // ステージデータ更新
-          let newStageData = { ...currentState.stageData };
-          if (data) {
-            const stageData = data as Record<string, unknown>;
-            
-            if (stage === 2 && stageData.categories) {
-              newStageData.categories = stageData.categories as Record<string, unknown[]>;
-            } else if (stage === 3) {
-              const translatedData = stageData.translatedCategories || stageData.translated_categories;
-              if (translatedData) {
-                newStageData.translatedCategories = translatedData as Record<string, unknown[]>;
-              }
-              if (status === 'completed') {
-                newStageData.stage3_completed = true;
-                newStageData.show_translated_menu = true;
-              }
-            } else if (stage === 4) {
-              // 最終結果の処理
-              const finalData = stageData.final_menu || stageData.finalMenu;
-              if (finalData) {
-                newStageData.finalMenu = finalData as Record<string, unknown[]>;
-              }
-              
-              // 部分結果の処理（従来）
-              if (stageData.partial_results) {
-                newStageData.partialResults = stageData.partial_results as Record<string, unknown[]>;
-              }
-              if (stageData.partial_menu) {
-                newStageData.partialMenu = stageData.partial_menu as Record<string, unknown[]>;
-              }
-              
-              // リアルタイム部分結果の処理（新）
-              if (!newStageData.realtimePartialResults) {
-                newStageData.realtimePartialResults = {};
-              }
-              if (!newStageData.completedCategories) {
-                newStageData.completedCategories = new Set<string>();
-              }
-              
-              // 処理中カテゴリの更新
-              if (stageData.processing_category) {
-                newStageData.processingCategory = stageData.processing_category as string;
-              }
-              
-              // チャンク進捗の更新
-              if (stageData.chunk_progress) {
-                const chunkInfo = stageData.chunk_progress as string;
-                const match = chunkInfo.match(/(\d+)\/(\d+)/);
-                if (match && newStageData.processingCategory) {
-                  newStageData.chunkProgress = {
-                    category: newStageData.processingCategory,
-                    completed: parseInt(match[1]),
-                    total: parseInt(match[2])
-                  };
-                }
-              }
-              
-              // カテゴリ完了時の処理
-              if (stageData.category_completed) {
-                const categoryName = stageData.category_completed as string;
-                newStageData.completedCategories.add(categoryName);
-                
-                // 完了したカテゴリのアイテムを取得
-                let completedItems: unknown[] = [];
-                if (stageData.completed_category_items) {
-                  completedItems = stageData.completed_category_items as unknown[];
-                } else if (stageData.final_menu && (stageData.final_menu as any)[categoryName]) {
-                  completedItems = (stageData.final_menu as any)[categoryName];
-                }
-                
-                // リアルタイム部分結果に追加
-                if (completedItems.length > 0) {
-                  newStageData.realtimePartialResults[categoryName] = completedItems;
-                  
-                  // カテゴリ完了通知を設定
-                  newStageData.categoryCompleted = {
-                    name: categoryName,
-                    items: completedItems,
-                    timestamp: Date.now()
-                  };
-                  
-                  console.log(`🎯 [Store] Category completed: ${categoryName} (${completedItems.length} items)`);
-                }
-              }
-              
-              // チャンク結果の処理
-              if (stageData.chunk_result) {
-                const chunkData = stageData.chunk_result as unknown[];
-                if (newStageData.processingCategory && chunkData.length > 0) {
-                  // 既存のデータに追加
-                  if (!newStageData.realtimePartialResults[newStageData.processingCategory]) {
-                    newStageData.realtimePartialResults[newStageData.processingCategory] = [];
-                  }
-                  newStageData.realtimePartialResults[newStageData.processingCategory].push(...chunkData);
-                  
-                  console.log(`📦 [Store] Chunk result added: ${newStageData.processingCategory} (+${chunkData.length} items)`);
-                }
-              }
-            } else if (stage === 5) {
-              // Stage 5: 画像生成の処理
-              console.log(`🎨 [Store] Stage 5 data received:`, {
-                stage: stage,
-                status: status,
-                message: message,
-                dataKeys: Object.keys(data || {}),
-                fullData: data
-              });
-              
-              if ((data as any).images_generated) {
-                console.log(`🔍 [Store] images_generated raw data:`, (data as any).images_generated);
-                console.log(`🔍 [Store] images_generated type:`, typeof (data as any).images_generated);
-                console.log(`🔍 [Store] images_generated keys:`, Object.keys((data as any).images_generated));
-                
-                // データの詳細構造を確認
-                for (const [key, value] of Object.entries((data as any).images_generated)) {
-                  console.log(`🔍 [Store] images_generated["${key}"]:`, value);
-                  console.log(`🔍 [Store] Value type:`, typeof value);
-                  if (typeof value === 'object' && value !== null) {
-                    console.log(`🔍 [Store] Object keys:`, Object.keys(value));
-                  }
-                }
-                
-                newStageData.imagesGenerated = (data as any).images_generated as Record<string, Array<{
-                  english_name?: string;
-                  image_url?: string;
-                  prompt_used?: string;
-                  error?: string;
-                  generation_success?: boolean;
-                }>>;
-                console.log(`🎨 [Store] Images generated: ${Object.keys((data as any).images_generated).length} items`);
-                console.log(`🎨 [Store] Image details:`, (data as any).images_generated);
-              }
-              if ((data as any).final_menu_with_images) {
-                newStageData.finalMenuWithImages = (data as any).final_menu_with_images as Record<string, unknown[]>;
-                console.log(`🖼️ [Store] Final menu with images received`);
-                console.log(`🖼️ [Store] Final menu categories:`, Object.keys((data as any).final_menu_with_images));
-              }
-              if ((data as any).skipped_reason) {
-                newStageData.imageGenerationSkipped = (data as any).skipped_reason as string;
-                console.log(`⚠️ [Store] Image generation skipped: ${(data as any).skipped_reason}`);
-              }
-              
-              // Stage 5の他のフィールドもチェック
-              if ((data as any).processing_category) {
-                console.log(`📂 [Store] Stage 5 processing category: ${(data as any).processing_category}`);
-              }
-              if ((data as any).category_completed) {
-                console.log(`✅ [Store] Stage 5 category completed: ${(data as any).category_completed}`);
-              }
-              if ((data as any).chunk_progress) {
-                console.log(`📦 [Store] Stage 5 chunk progress: ${(data as any).chunk_progress}`);
-              }
-            } else if (stage === 6) {
-              // Stage 6: 完了処理
-              console.log(`✅ [Store] Process completed at Stage 6`);
-              console.log(`✅ [Store] Stage 6 data:`, data);
-            }
-          }
-          
-          set({ 
-            currentStage: stage,
-            progressStages: newProgressStages,
-            stageData: newStageData
-          });
+          // Progress Store の更新機能を使用
+          useProgressStore.getState().updateProgress(stage, status, message, data);
         },
         useSessionId
       );
       
       // セッションIDを保存
       if (result.session_id) {
-        set({ result, isLoading: false, sessionId: result.session_id });
+        useProgressStore.getState().setSessionId(result.session_id);
+        set({ result, isLoading: false });
       } else {
         set({ result, isLoading: false });
       }
@@ -390,33 +112,11 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
 
   clearResult: () => {
     set({ result: null, error: null });
-    get().resetProgress();
+    useProgressStore.getState().resetProgress();
   },
 
   clearError: () => {
     set({ error: null });
-  },
-
-  resetProgress: () => {
-    set({
-      currentStage: 0,
-      progressStages: [
-        { stage: 1, status: 'pending', message: 'OCR - 画像からテキストを抽出' },
-        { stage: 2, status: 'pending', message: 'カテゴリ分析 - 日本語メニューを分析' },
-        { stage: 3, status: 'pending', message: '翻訳 - 英語に翻訳' },
-        { stage: 4, status: 'pending', message: '詳細説明 - 詳細な説明を追加' },
-        { stage: 5, status: 'pending', message: '画像生成 - AI画像を生成' },
-        { stage: 6, status: 'pending', message: '完了 - 処理完了' },
-      ],
-      stageData: {
-        // リアルタイム部分結果もリセット
-        realtimePartialResults: {},
-        completedCategories: new Set<string>(),
-        processingCategory: undefined,
-        chunkProgress: undefined,
-        categoryCompleted: undefined
-      }
-    });
   },
 
   // === UI Actions ===
@@ -464,268 +164,32 @@ export const useMenuStore = create<MenuStore>((set, get) => ({
     set((state) => ({ ui: { ...state.ui, currentView: view } }));
   },
 
-  // === Utility Functions ===
+  // === Utility Functions (Data Store Proxies) ===
   getEmojiForCategory: (category: string) => {
-    const lowerCategory = category.toLowerCase();
-    for (const [key, emoji] of Object.entries(categoryEmojiMap)) {
-      if (lowerCategory.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerCategory)) {
-        return emoji;
-      }
-    }
-    return '🍽️'; // デフォルト
+    return useDataStore.getState().getEmojiForCategory(category);
   },
 
   getCurrentMenuData: () => {
-    const { stageData, currentStage } = get();
-    
-    // Stage 5: 画像付き完全版
-    if (currentStage >= 5 && stageData.finalMenuWithImages) {
-      return stageData.finalMenuWithImages;
-    }
-    
-    // Stage 4: 完全版（詳細説明付き）
-    if (currentStage >= 4 && stageData.finalMenu) {
-      return stageData.finalMenu;
-    }
-    
-    // Stage 4進行中: リアルタイム部分結果をマージして表示
-    if (currentStage === 4) {
-      // リアルタイム部分結果があればそれを基にマージ
-      if (stageData.realtimePartialResults && Object.keys(stageData.realtimePartialResults).length > 0) {
-        const baseData = stageData.translatedCategories || {};
-        const mergedData: Record<string, unknown[]> = {};
-        
-        // 全カテゴリをベースにマージ
-        for (const [category, items] of Object.entries(baseData)) {
-          // リアルタイム結果があればそれを使用、なければ翻訳結果を使用
-          if (stageData.realtimePartialResults[category]) {
-            mergedData[category] = stageData.realtimePartialResults[category];
-            console.log(`📊 [Store] Using realtime data for ${category}: ${stageData.realtimePartialResults[category].length} items`);
-          } else {
-            mergedData[category] = items;
-          }
-        }
-        
-        return mergedData;
-      }
-      
-      // リアルタイム結果がない場合は従来の部分結果を使用
-      if (stageData.partialMenu) {
-        return stageData.partialMenu;
-      }
-      
-      // 部分結果もない場合は翻訳結果を表示
-      if (stageData.translatedCategories && stageData.show_translated_menu) {
-        return stageData.translatedCategories;
-      }
-    }
-    
-    // Stage 3: 翻訳版
-    if (currentStage >= 3 && stageData.translatedCategories && stageData.show_translated_menu) {
-      return stageData.translatedCategories;
-    }
-    
-    // Stage 2: カテゴリ分析版
-    if (currentStage >= 2 && stageData.categories) {
-      return stageData.categories;
-    }
-    
-    return null;
+    return useDataStore.getState().getCurrentMenuData();
   },
 
   getFilteredItems: () => {
-    const { ui } = get();
-    const menuData = get().getCurrentMenuData();
-    
-    if (!menuData) return [];
-    
-    let allItems: unknown[] = [];
-    
-    // カテゴリフィルタリング
-    if (ui.selectedCategory === 'all') {
-      allItems = Object.values(menuData).flat();
-    } else {
-      allItems = menuData[ui.selectedCategory] || [];
-    }
-    
-    return allItems;
+    return useDataStore.getState().getFilteredItems();
   },
 
   getCategoryList: () => {
-    const menuData = get().getCurrentMenuData();
-    return menuData ? Object.keys(menuData) : [];
+    return useDataStore.getState().getCategoryList();
   },
 
-  // === Stage 4リアルタイム状態判定ユーティリティ ===
-  getMenuItemStatus: (item: any, categoryName: string) => {
-    const { stageData, currentStage } = get();
-    
-    // Stage 4未満では基本状態のみ
-    if (currentStage < 4) {
-      return {
-        isTranslated: currentStage >= 3 && Boolean(item.english_name),
-        isComplete: false,
-        isPartiallyComplete: false,
-        isCurrentlyProcessing: false
-      };
-    }
-    
-    // Stage 4での詳細判定
-    const isComplete = Boolean(item.description && item.description !== 'N/A' && item.description.length > 20);
-    const isCurrentlyProcessing = stageData.processingCategory === categoryName;
-    const isCategoryCompleted = stageData.completedCategories?.has(categoryName) || false;
-    
-    return {
-      isTranslated: Boolean(item.english_name),
-      isComplete: isComplete && isCategoryCompleted,
-      isPartiallyComplete: Boolean(item.description) && !isComplete,
-      isCurrentlyProcessing: isCurrentlyProcessing && !isCategoryCompleted
-    };
-  },
-
-  getCategoryProgress: (categoryName: string) => {
-    const { stageData, currentStage } = get();
-    
-    if (currentStage < 4) return null;
-    
-    const menuData = get().getCurrentMenuData();
-    if (!menuData || !menuData[categoryName]) return null;
-    
-    const items = menuData[categoryName];
-    const total = items.length;
-    let completed = 0;
-    let partial = 0;
-    
-    items.forEach(item => {
-      const status = get().getMenuItemStatus(item, categoryName);
-      if (status.isComplete) completed++;
-      else if (status.isPartiallyComplete) partial++;
-    });
-    
-    return {
-      total,
-      completed,
-      partial,
-      processing: stageData.processingCategory === categoryName,
-      isCompleted: stageData.completedCategories?.has(categoryName) || false
-    };
-  },
-
-  getOverallProgress: () => {
-    const { currentStage } = get();
-    const menuData = get().getCurrentMenuData();
-    
-    if (!menuData || currentStage < 4) return null;
-    
-    let totalItems = 0;
-    let completedItems = 0;
-    let partialItems = 0;
-    
-    Object.keys(menuData).forEach(categoryName => {
-      const progress = get().getCategoryProgress(categoryName);
-      if (progress) {
-        totalItems += progress.total;
-        completedItems += progress.completed;
-        partialItems += progress.partial;
-      }
-    });
-    
-    return {
-      totalItems,
-      completedItems,
-      partialItems,
-      progressPercent: totalItems > 0 ? Math.round(((completedItems + partialItems * 0.5) / totalItems) * 100) : 0
-    };
-  },
-
-  // === 画像生成関連のヘルパー ===
+  // === 画像生成関連のヘルパー (Data Store Proxies) ===
   getGeneratedImageUrl: (item: any) => {
-    const { stageData } = get();
-    
-    // Stage 5の画像が生成されていない場合はnull
-    if (!stageData.imagesGenerated) {
-      console.log(`🖼️ [Store] No images generated yet`);
-      return null;
-    }
-    
-    // アイテム名から画像ファイル名を推測
-    const itemName = item.english_name || item.name_english || item.name || '';
-    if (!itemName) {
-      console.log(`🖼️ [Store] No item name found for:`, item);
-      return null;
-    }
-    
-    // 画像マッピングから対応する画像パスを探す
-    const normalizedItemName = itemName.toLowerCase().replace(/\s+/g, '_');
-    
-    console.log(`🔍 [Store] Looking for image: "${itemName}" (normalized: "${normalizedItemName}")`);
-    console.log(`🔍 [Store] Available categories:`, Object.keys(stageData.imagesGenerated));
-    
-    // カテゴリごとに配列を検索
-    for (const [categoryName, categoryImages] of Object.entries(stageData.imagesGenerated)) {
-      if (Array.isArray(categoryImages)) {
-        console.log(`🔍 [Store] Checking category: "${categoryName}" (${categoryImages.length} items)`);
-        
-        for (let i = 0; i < categoryImages.length; i++) {
-          const imageItem = categoryImages[i] as any;
-          const imageItemName = imageItem.english_name || imageItem.name || imageItem.item_name || '';
-          const imageUrl = imageItem.image_url || imageItem.url || imageItem.path || '';
-          
-          if (imageItemName && imageUrl) {
-            const normalizedImageName = imageItemName.toLowerCase().replace(/\s+/g, '_');
-            console.log(`🔍 [Store] Comparing "${normalizedItemName}" with "${normalizedImageName}" (${categoryName}[${i}])`);
-            
-                         // 名前の一致チェック（完全一致優先、部分一致もサポート）
-             if (normalizedImageName === normalizedItemName || 
-                 normalizedImageName.includes(normalizedItemName) || 
-                 normalizedItemName.includes(normalizedImageName)) {
-               
-               // 静的ファイル配信用のURLを構築（メインルートの /uploads/ を使用）
-               const baseUrl = 'http://localhost:8000';
-               // imageUrl が /uploads/ で始まる場合はそのまま使用、そうでなければ /uploads/ を追加
-               const imagePath = imageUrl.startsWith('/uploads/') ? imageUrl : `/uploads${imageUrl}`;
-               const fullUrl = `${baseUrl}${imagePath}`;
-               console.log(`✅ [Store] Image match found: "${itemName}" → "${fullUrl}"`);
-               return fullUrl;
-             }
-          } else {
-            console.log(`🔍 [Store] Invalid image item in ${categoryName}[${i}]:`, imageItem);
-          }
-        }
-      } else {
-        console.log(`🔍 [Store] ${categoryName} is not an array:`, typeof categoryImages);
-      }
-    }
-    
-    console.log(`❌ [Store] No image match found for: "${itemName}"`);
-    return null;
+    return useDataStore.getState().getGeneratedImageUrl(item);
   },
 
   hasGeneratedImages: () => {
-    const { stageData } = get();
-    
-    if (!stageData.imagesGenerated || Object.keys(stageData.imagesGenerated).length === 0) {
-      return false;
-    }
-    
-    // カテゴリごとに配列をチェック
-    for (const [categoryName, categoryImages] of Object.entries(stageData.imagesGenerated)) {
-      if (Array.isArray(categoryImages) && categoryImages.length > 0) {
-        // 有効な画像アイテムがあるかチェック
-        for (const imageItem of categoryImages) {
-          const imageUrl = (imageItem as any).image_url || (imageItem as any).url || (imageItem as any).path;
-          if (imageUrl) {
-            console.log(`🖼️ [Store] Images found in category: ${categoryName}`);
-            return true;
-          }
-        }
-      }
-    }
-    
-    console.log(`🖼️ [Store] No valid images found`);
-    return false;
+    return useDataStore.getState().hasGeneratedImages();
   },
 }));
 
-// 旧ストアとの互換性のためのエイリアス
+// Legacy alias for backward compatibility
 export const useTranslationStore = useMenuStore; 

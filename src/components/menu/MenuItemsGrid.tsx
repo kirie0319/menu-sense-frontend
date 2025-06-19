@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Heart, Info, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMenuStore } from '@/lib/store';
+import { useUIStore } from '@/lib/stores/uiStore';
 
 // Cursor-style typewriter effect component
 const TypewriterText = ({ text, speed = 50 }: { text: string; speed?: number }) => {
@@ -31,10 +32,11 @@ const TypewriterText = ({ text, speed = 50 }: { text: string; speed?: number }) 
 };
 
 export const MenuItemsGrid: React.FC = () => {
+  // UI関連は新しいUIStoreから取得
+  const { ui, showItemDetail, toggleFavorite } = useUIStore();
+  
+  // データ関連は既存ストアから継続取得
   const { 
-    ui,
-    showItemDetail,
-    toggleFavorite,
     getFilteredItems,
     getGeneratedImageUrl,
     hasGeneratedImages

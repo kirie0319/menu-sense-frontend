@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslationStore } from '@/lib/store';
+import { useProgressStore } from '@/lib/stores/progressStore';
 import TranslationStatus from './TranslationStatus';
 import DebugMonitor from './DebugMonitor';
 import { motion } from 'framer-motion';
@@ -10,16 +11,18 @@ import { ArrowLeft } from 'lucide-react';
 
 const ProcessPage = () => {
   const router = useRouter();
+  
+  // メインストアから基本状態とアクションを取得
   const { 
     selectedFile, 
     isLoading, 
     error,
-    currentStage,
-    stageData,
-    sessionId,
     clearError,
     translateMenu
   } = useTranslationStore();
+
+  // Progress関連は新しいProgressStoreから取得
+  const { currentStage, stageData, sessionId } = useProgressStore();
 
   useEffect(() => {
     // ファイルが選択されていない場合はホームページにリダイレクト
