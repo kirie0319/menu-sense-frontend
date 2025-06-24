@@ -47,6 +47,53 @@ interface StageData {
   }>>;
   finalMenuWithImages?: Record<string, unknown[]>;
   imageGenerationSkipped?: string;
+  
+  // 新しい並列処理システムのデータ
+  completed_items?: number;
+  total_items?: number;
+  progress_percentage?: number;
+  api_stats?: {
+    translation_completed?: number;
+    description_completed?: number;
+    image_completed?: number;
+  };
+  api_integration?: string;
+  elapsed_time?: number;
+  items_status?: Array<{
+    item_id?: number;
+    translation_completed?: boolean;
+    description_completed?: boolean;
+    image_completed?: boolean;
+    japanese_text?: string;
+    english_text?: string;
+    description?: string;
+    image_url?: string;
+  }>;
+  
+  // リアルタイムアイテムキュー
+  realtime_items?: Record<string, Array<{
+    item_id: number;
+    japanese_name: string;
+    english_name: string;
+    description: string;
+    category: string;
+    price: string;
+    status: 'queued' | 'translating' | 'describing' | 'generating_image' | 'completed';
+  }>>;
+  
+  // キューイングされたアイテム
+  queued_item?: {
+    item_id: number;
+    japanese_name: string;
+    english_name: string;
+    description: string;
+    category: string;
+    price: string;
+    status: string;
+  };
+  
+  // リアルタイムアイテム状態更新フラグ
+  update_realtime_items?: boolean;
 }
 
 // Progress Store の型定義
@@ -134,6 +181,103 @@ export const useProgressStore = create<ProgressStore>((set, get) => ({
     let newStageData = { ...currentState.stageData };
     if (data) {
       const stageData = data as Record<string, unknown>;
+      
+      // リアルタイムアイテムキューイングの処理
+      if (stageData.queued_item) {
+        const queuedItem = stageData.queued_item as StageData['queued_item'];
+        if (queuedItem) {
+          // リアルタイムアイテムデータの初期化
+          if (!newStageData.realtime_items) {
+            newStageData.realtime_items = {};
+          }
+          
+          // カテゴリ別にアイテムを分類
+          const categoryName = queuedItem.category;
+          if (!newStageData.realtime_items[categoryName]) {
+            newStageData.realtime_items[categoryName] = [];
+          }
+          
+          // 重複チェック（同じitem_idがすでに存在するかチェック）
+          const existingIndex = newStageData.realtime_items[categoryName].findIndex(
+            item => item.item_id === queuedItem.item_id
+          );
+          
+          if (existingIndex === -1) {
+            // 新しいアイテムを追加
+            newStageData.realtime_items[categoryName].push({
+              item_id: queuedItem.item_id,
+              japanese_name: queuedItem.japanese_name,
+              english_name: queuedItem.english_name,
+              description: queuedItem.description,
+              category: queuedItem.category,
+              price: queuedItem.price,
+              status: queuedItem.status as any
+            });
+            
+            console.log(`📤 [ProgressStore] Item queued: ${queuedItem.japanese_name} → ${categoryName} (${newStageData.realtime_items[categoryName].length} items)`);
+          }
+        }
+      }
+      
+      // 新しい並列処理システムのデータ形式に対応
+      if (stageData.completed_items !== undefined && stageData.total_items !== undefined) {
+        newStageData.completed_items = typeof stageData.completed_items === 'number' ? stageData.completed_items : 0;
+        newStageData.total_items = typeof stageData.total_items === 'number' ? stageData.total_items : 0;
+        newStageData.progress_percentage = typeof stageData.progress_percentage === 'number' ? stageData.progress_percentage : 0;
+        newStageData.api_stats = stageData.api_stats as StageData['api_stats'];
+        newStageData.api_integration = typeof stageData.api_integration === 'string' ? stageData.api_integration : undefined;
+        newStageData.elapsed_time = typeof stageData.elapsed_time === 'number' ? stageData.elapsed_time : undefined;
+        
+        // アイテム状況の詳細情報
+        if (Array.isArray(stageData.items_status)) {
+          newStageData.items_status = stageData.items_status as StageData['items_status'];
+          
+          // リアルタイムアイテム状態更新が必要な場合
+          if (stageData.update_realtime_items && newStageData.realtime_items) {
+            console.log(`🔄 [ProgressStore] Updating realtime item statuses from items_status`);
+            
+            // items_statusからリアルタイムアイテムの状態を更新
+            stageData.items_status.forEach((statusItem: any) => {
+              const itemId = statusItem.item_id;
+              
+              // 各カテゴリでitem_idが一致するアイテムを探して更新
+              Object.keys(newStageData.realtime_items!).forEach(categoryName => {
+                const categoryItems = newStageData.realtime_items![categoryName];
+                const itemIndex = categoryItems.findIndex(item => item.item_id === itemId);
+                
+                if (itemIndex !== -1) {
+                  // アイテムの状態を更新
+                  const updatedItem = { ...categoryItems[itemIndex] };
+                  
+                  // 翻訳完了時の更新
+                  if (statusItem.translation_completed && statusItem.english_text) {
+                    updatedItem.english_name = statusItem.english_text;
+                    updatedItem.status = 'translating';
+                  }
+                  
+                  // 説明完了時の更新
+                  if (statusItem.description_completed && statusItem.description) {
+                    updatedItem.description = statusItem.description;
+                    updatedItem.status = 'describing';
+                  }
+                  
+                  // 完全完了時の更新
+                  if (statusItem.translation_completed && statusItem.description_completed) {
+                    updatedItem.status = 'completed';
+                  }
+                  
+                  // 更新されたアイテムを配列に反映
+                  newStageData.realtime_items![categoryName][itemIndex] = updatedItem;
+                  
+                  console.log(`🔄 [ProgressStore] Updated item ${itemId} (${updatedItem.japanese_name}) → ${updatedItem.status}`);
+                }
+              });
+            });
+          }
+        }
+        
+        console.log(`🔄 [ProgressStore] Parallel processing update: ${newStageData.completed_items}/${newStageData.total_items} (${Math.round(newStageData.progress_percentage || 0)}%)`);
+      }
       
       if (stage === 2 && stageData.categories) {
         newStageData.categories = stageData.categories as Record<string, unknown[]>;

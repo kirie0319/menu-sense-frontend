@@ -4,12 +4,12 @@ import { TranslationResponse, ApiError, ApiMenuItem } from '@/types';
 // バックエンドのベースURL（環境変数から取得、バージョン含む）
 const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const apiVersion = process.env.NEXT_PUBLIC_API_VERSION || 'v1';
-export const API_BASE_URL = `${baseUrl}/${apiVersion}`;
+export const API_BASE_URL = `${baseUrl}/api/${apiVersion}`;
 
 // Axiosインスタンスを作成
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 300000, // 60秒タイムアウト（画像処理には時間がかかる場合があるため）
+  timeout: 300000, // 5分タイムアウト（並列処理には時間がかかる場合があるため）
 });
 
 export class MenuTranslationApi {
@@ -85,7 +85,7 @@ export class MenuTranslationApi {
   }
 
   /**
-   * リアルタイム進捗付きメニュー翻訳（SSE使用 + デバッグログ強化）
+   * 新しい並列処理API統合（OCR → 並列処理統合）
    */
   static async translateMenuWithProgress(
     file: File,
@@ -93,14 +93,13 @@ export class MenuTranslationApi {
     existingSessionId?: string
   ): Promise<TranslationResponse> {
     const startTime = Date.now();
-    console.log(`[API] 🔄 Starting progress translation for file: ${file.name} (${file.size} bytes)`);
+    console.log(`[API] 🚀 Starting new parallel processing for file: ${file.name} (${file.size} bytes)`);
     
-    // まずファイルをアップロードしてセッションIDを取得
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => {
-      console.log(`[API] ⏰ Upload timeout after 5 minutes`);
+      console.log(`[API] ⏰ Parallel processing timeout after 10 minutes`);
       abortController.abort();
-    }, 5 * 60 * 1000); // 5分タイムアウト（延長）
+    }, 10 * 60 * 1000); // 10分タイムアウト（並列処理のため延長）
 
     try {
       let sessionId: string;
@@ -109,51 +108,71 @@ export class MenuTranslationApi {
         // 既存のセッションIDを使用
         sessionId = existingSessionId;
         console.log(`[API] 🔄 Using existing session ID: ${sessionId}`);
+        
+        // 既存セッションの場合は、直接SSE監視を開始
+        const result = await this.monitorParallelProgress(sessionId, onProgress, abortController, startTime);
+        return { ...result, session_id: sessionId };
       } else {
-        // 新しいセッションを作成
+        // 新しいOCR→並列処理統合フロー
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('use_real_apis', 'true');
 
-        console.log(`[API] 📤 Uploading file to /process`);
+        console.log(`[API] 📤 Starting OCR-to-Parallel processing`);
         
-        // セッション開始
-        const startResponse = await api.post('/process', formData, {
+        // OCR→並列処理統合エンドポイントを呼び出し
+        const startResponse = await api.post('/menu-parallel/ocr-to-parallel', formData, {
           headers: {
             'Content-Type': 'multipart/form-data',
           },
           signal: abortController.signal,
-          timeout: 60000, // 60秒（アップロードタイムアウト延長）
+          timeout: 60000, // 60秒（初期処理タイムアウト）
         });
 
         sessionId = startResponse.data.session_id;
-        console.log(`[API] 🆔 Session started with ID: ${sessionId}`);
-      }
+        console.log(`[API] 🆔 Parallel processing started with session ID: ${sessionId}`);
+        console.log(`[API] 📊 OCR result: ${startResponse.data.ocr_result?.extracted_text?.length || 0} characters`);
+        console.log(`[API] 📋 Categories: ${Object.keys(startResponse.data.categorization_result?.categories || {}).length} found`);
 
-      // Server-Sent Eventsで進捗を監視
-      const result = await this.monitorProgress(sessionId, onProgress, abortController, startTime);
-      
-      const totalDuration = Date.now() - startTime;
-      console.log(`[API] ✅ Progress translation completed in ${totalDuration}ms`);
-      
-      // セッションIDを結果に含める
-      return {
-        ...result,
-        session_id: sessionId
-      };
+        // 初期進捗を通知（Stage 1, 2完了）
+        if (startResponse.data.ocr_result?.extracted_text) {
+          onProgress(1, 'completed', 'OCR completed', {
+            extracted_text: startResponse.data.ocr_result.extracted_text
+          });
+        }
+
+        if (startResponse.data.categorization_result?.categories) {
+          onProgress(2, 'completed', 'Menu categorization completed', {
+            categories: startResponse.data.categorization_result.categories
+          });
+        }
+
+        // 並列処理の進捗をSSEで監視
+        const result = await this.monitorParallelProgress(sessionId, onProgress, abortController, startTime);
+        
+        const totalDuration = Date.now() - startTime;
+        console.log(`[API] ✅ Parallel processing completed in ${totalDuration}ms`);
+        
+        return {
+          ...result,
+          session_id: sessionId,
+          extracted_text: startResponse.data.ocr_result?.extracted_text || result.extracted_text
+        };
+      }
       
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.log(`[API] ❌ Progress translation failed after ${duration}ms`);
+      console.log(`[API] ❌ Parallel processing failed after ${duration}ms`);
       
       clearTimeout(timeoutId);
       
       if (abortController.signal.aborted) {
-        console.log(`[API] 🛑 Upload request was aborted (timeout)`);
-        throw new Error('Upload request timed out. Please check your internet connection and try again.');
+        console.log(`[API] 🛑 Request was aborted (timeout)`);
+        throw new Error('Processing request timed out. Please try again.');
       }
       
       if (axios.isAxiosError(error)) {
-        console.log(`[API] 🔍 Upload error details:`, {
+        console.log(`[API] 🔍 Error details:`, {
           code: error.code,
           message: error.message,
           status: error.response?.status,
@@ -161,22 +180,332 @@ export class MenuTranslationApi {
         });
         
         if (error.code === 'ECONNABORTED') {
-          throw new Error('Upload timed out. Please try again with a smaller image.');
+          throw new Error('Request timed out. Please try again with a smaller image.');
         }
         
         if (error.response?.data) {
           const apiError = error.response.data as ApiError;
-          throw new Error(apiError.detail || 'Upload failed');
+          throw new Error(apiError.detail || 'Processing failed');
         } else if (error.code === 'ECONNREFUSED') {
           throw new Error('Backend server is not running. Please start the backend server.');
         }
       }
       
-      console.log(`[API] 🔍 Unknown upload error:`, error);
-      throw new Error('Failed to start menu processing');
+      console.log(`[API] 🔍 Unknown error:`, error);
+      throw new Error('Failed to start parallel processing');
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  /**
+   * 新しい並列処理API用のSSE監視（menu-parallel/stream/{session_id}）
+   */
+  private static async monitorParallelProgress(
+    sessionId: string,
+    onProgress: (stage: number, status: string, message: string, data?: unknown) => void,
+    abortController: AbortController,
+    startTime: number
+  ): Promise<TranslationResponse> {
+    return new Promise((resolve, reject) => {
+      const encodedSessionId = encodeURIComponent(sessionId);
+      const sseUrl = `${API_BASE_URL}/menu-parallel/stream/${encodedSessionId}`;
+      
+      console.log(`[SSE] 🔗 Starting parallel processing SSE connection to: ${sseUrl}`);
+      
+      let eventSource: EventSource | null = null;
+      let heartbeatInterval: NodeJS.Timeout | null = null;
+      let isCleanedUp = false;
+      
+      const cleanup = (reason: string) => {
+        if (isCleanedUp) return;
+        isCleanedUp = true;
+        
+        console.log(`[SSE] 🧹 Cleaning up parallel SSE connection: ${reason}`);
+        
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+          heartbeatInterval = null;
+        }
+        
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+      };
+      
+      try {
+        eventSource = new EventSource(sseUrl);
+      } catch (error) {
+        console.error(`[SSE] ❌ Failed to create parallel EventSource:`, error);
+        reject(new Error(`Failed to create parallel SSE connection: ${error instanceof Error ? error.message : 'Unknown error'}`));
+        return;
+      }
+      
+      let lastHeartbeat = Date.now();
+      let currentStage = 3; // 並列処理はStage 3から開始
+      let finalResult: TranslationResponse | null = null;
+      let completedItems: ApiMenuItem[] = [];
+      
+      // ハートビート監視
+      const checkHeartbeat = () => {
+        if (isCleanedUp) return;
+        
+        const timeout = 300000; // 5分タイムアウト
+        const elapsed = Date.now() - lastHeartbeat;
+        
+        if (elapsed > timeout) {
+          cleanup(`Parallel processing timeout (${timeout/1000}s)`);
+          
+          if (completedItems.length > 0) {
+            // 部分結果で完了
+            console.log(`[SSE] ⚠️ Timeout but returning ${completedItems.length} completed items`);
+            resolve({
+              extracted_text: finalResult?.extracted_text || '',
+              menu_items: completedItems
+            });
+          } else {
+            reject(new Error('Parallel processing timeout. No completed items found.'));
+          }
+        }
+      };
+      
+      heartbeatInterval = setInterval(checkHeartbeat, 10000);
+
+      // AbortController対応
+      const abortHandler = () => {
+        cleanup('User cancellation');
+        reject(new Error('Parallel processing was cancelled'));
+      };
+      
+      abortController.signal.addEventListener('abort', abortHandler, { once: true });
+
+      // SSE接続成功
+      eventSource.onopen = () => {
+        console.log(`[SSE] ✅ Parallel processing connection established`);
+        lastHeartbeat = Date.now();
+      };
+
+      // メッセージ受信処理
+      eventSource.onmessage = (event) => {
+        if (isCleanedUp) return;
+        
+        lastHeartbeat = Date.now();
+        
+        let eventData: any;
+        try {
+          eventData = JSON.parse(event.data);
+        } catch (parseError) {
+          console.error('❌ Failed to parse parallel SSE data:', parseError);
+          return;
+        }
+        
+        const eventType = eventData.type;
+        
+        // ハートビート処理
+        if (eventType === 'heartbeat' || eventType === 'connection_established') {
+          console.log(`[SSE] 💓 ${eventType} received`);
+          return;
+        }
+        
+        // 並列処理開始イベント
+        if (eventType === 'parallel_processing_started') {
+          console.log(`[SSE] 🚀 Parallel processing started with OCR & Categorization complete`);
+          
+          // OCR結果をprogressに通知（Stage 1完了）
+          if (eventData.ocr_result?.extracted_text) {
+            onProgress(1, 'completed', 'OCR completed', {
+              extracted_text: eventData.ocr_result.extracted_text
+            });
+            
+            if (!finalResult) {
+              finalResult = {
+                extracted_text: eventData.ocr_result.extracted_text,
+                menu_items: []
+              };
+            } else {
+              finalResult.extracted_text = eventData.ocr_result.extracted_text;
+            }
+          }
+          
+          // カテゴリ分析結果をprogressに通知（Stage 2完了）
+          if (eventData.categorization_result?.categories) {
+            onProgress(2, 'completed', 'Menu categorization completed', {
+              categories: eventData.categorization_result.categories
+            });
+          }
+          
+          // 並列処理開始をStage 3として通知
+          onProgress(3, 'active', `Starting parallel processing for ${eventData.total_items} items`, {
+            total_items: eventData.total_items,
+            completed_items: 0,
+            progress_percentage: 0
+          });
+          
+          return;
+        }
+        
+        // 個別アイテムタスクキューイベント（リアルタイムメニューアイテム表示用）
+        if (eventType === 'item_task_queued') {
+          console.log(`[SSE] 📤 Item queued: ${eventData.item_text} (${eventData.category})`);
+          
+          // リアルタイムでメニューアイテムを蓄積
+          if (!finalResult) {
+            finalResult = { extracted_text: '', menu_items: [] };
+          }
+          
+          // アイテム情報をリアルタイムアイテムリストに追加
+          onProgress(3, 'active', `Queuing item: ${eventData.item_text}`, {
+            queued_item: {
+              item_id: eventData.item_id,
+              japanese_name: eventData.item_text,
+              english_name: eventData.item_text, // 初期状態では日本語名をコピー
+              description: 'Processing...',
+              category: eventData.category,
+              price: '',
+              status: 'queued'
+            },
+            total_items: eventData.total_items || 0,
+            completed_items: 0,
+            progress_percentage: 0
+          });
+          
+          return;
+        }
+        
+        // 進捗更新イベント
+        if (eventType === 'progress_update') {
+          const stage = this.determineStageFromApiStats(eventData);
+          const message = `Processing ${eventData.completed_items}/${eventData.total_items} items (${Math.round(eventData.progress_percentage)}%)`;
+          
+          console.log(`[SSE] 📊 Progress: ${message}`);
+          
+          onProgress(stage, 'active', message, {
+            completed_items: eventData.completed_items,
+            total_items: eventData.total_items,
+            progress_percentage: eventData.progress_percentage,
+            items_status: eventData.items_status
+          });
+          
+          // 完了したアイテムを蓄積（より柔軟なアプローチ）
+          if (eventData.items_status && Array.isArray(eventData.items_status)) {
+            completedItems = [];
+            eventData.items_status.forEach((item: any) => {
+              // 翻訳と説明の両方が完了しているか、少なくとも翻訳が完了しているアイテムを含める
+              if ((item.translation_completed && item.description_completed) || 
+                  (item.translation_completed && item.english_text)) {
+                completedItems.push({
+                  japanese_name: item.japanese_text || item.original_text || 'Unknown',
+                  english_name: item.english_text || item.translated_text || 'Unknown',
+                  description: item.description || 'Description in progress...',
+                  price: item.price || ''
+                });
+              }
+            });
+            
+            console.log(`[SSE] 📦 Items accumulated: ${completedItems.length}/${eventData.items_status.length}`);
+            
+            // リアルタイムアイテム状態更新情報も送信
+            onProgress(stage, status, message, {
+              completed_items: eventData.completed_items,
+              total_items: eventData.total_items,
+              progress_percentage: eventData.progress_percentage,
+              items_status: eventData.items_status,
+              update_realtime_items: true // リアルタイムアイテム更新フラグ
+            });
+            
+            return;
+          }
+          
+          return;
+        }
+        
+        // 処理完了イベント
+        if (eventType === 'processing_completed') {
+          console.log(`[SSE] 🎉 Parallel processing completed`);
+          
+          onProgress(6, 'completed', 'All menu items processed successfully', {
+            total_items: eventData.final_stats?.total_items,
+            completed_items: eventData.final_stats?.completed_items,
+            success_rate: eventData.final_stats?.success_rate
+          });
+          
+          cleanup('Processing completed');
+          
+          // 最終結果を構築 - 最後のitems_statusから完成したアイテムを取得
+          let finalMenuItems: ApiMenuItem[] = [];
+          
+          // 最新のitems_statusからすべてのアイテムを構築
+          if (eventData.items_status && Array.isArray(eventData.items_status)) {
+            finalMenuItems = eventData.items_status.map((item: any) => ({
+              japanese_name: item.japanese_text || item.original_text || 'Unknown',
+              english_name: item.english_text || item.translated_text || 'Unknown',
+              description: item.description || 'Description not available',
+              price: item.price || ''
+            }));
+          } else if (completedItems.length > 0) {
+            // フォールバック：蓄積されたcompletedItemsを使用
+            finalMenuItems = completedItems;
+          }
+          
+          console.log(`[SSE] 📋 Final menu items count: ${finalMenuItems.length}`);
+          
+          // 最終結果を構築
+          if (!finalResult) {
+            finalResult = {
+              extracted_text: '',
+              menu_items: finalMenuItems
+            };
+          } else {
+            finalResult.menu_items = finalMenuItems;
+          }
+          
+          resolve(finalResult);
+          return;
+        }
+        
+        // 個別アイテム完了イベント
+        if (eventType === 'item_completed') {
+          console.log(`[SSE] ✅ Item completed: ${eventData.english_name}`);
+          return;
+        }
+        
+        // エラーイベント
+        if (eventType === 'stream_error') {
+          console.error(`[SSE] ❌ Stream error:`, eventData.error);
+          cleanup('Stream error');
+          reject(new Error(`Parallel processing error: ${eventData.error}`));
+          return;
+        }
+        
+        // その他のイベント
+        console.log(`[SSE] 📨 Unhandled parallel event type: ${eventType}`, eventData);
+      };
+
+      // SSE接続エラー
+      eventSource.onerror = (error) => {
+        console.error(`[SSE] ❌ Parallel connection error:`, error);
+        cleanup('Connection error');
+        reject(new Error('Lost connection to parallel processing stream'));
+      };
+    });
+  }
+
+  /**
+   * API統計からステージを推定
+   */
+  private static determineStageFromApiStats(eventData: any): number {
+    const { api_stats } = eventData;
+    
+    if (!api_stats) return 3;
+    
+    const { translation_completed, description_completed, image_completed } = api_stats;
+    
+    if (image_completed > 0) return 5; // 画像生成中
+    if (description_completed > 0) return 4; // 詳細説明中
+    if (translation_completed > 0) return 3; // 翻訳中
+    
+    return 3; // デフォルト
   }
 
   /**

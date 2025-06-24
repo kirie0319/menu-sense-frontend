@@ -42,6 +42,77 @@ export const useDataStore = create<DataStore>(() => ({
   getCurrentMenuData: () => {
     const { stageData, currentStage } = useProgressStore.getState();
     
+    // 新しい並列処理システム：MenuStoreの結果を最優先で確認
+    const menuStoreState = (() => {
+      try {
+        // 循環参照を避けるため、直接ストアから取得
+        const stores = require('../store');
+        return stores.useMenuStore.getState();
+      } catch (error) {
+        console.warn('[DataStore] Failed to access MenuStore:', error);
+        return null;
+      }
+    })();
+    
+    // リアルタイムアイテムキューを最優先で確認（処理中の表示）
+    if (currentStage >= 3 && stageData.realtime_items && Object.keys(stageData.realtime_items).length > 0) {
+      console.log(`📤 [DataStore] Using realtime queued items: ${Object.keys(stageData.realtime_items).length} categories`);
+      
+      // リアルタイムアイテムキューをそのまま返す
+      const realtimeMenu: MenuData = {};
+      for (const [categoryName, items] of Object.entries(stageData.realtime_items)) {
+        realtimeMenu[categoryName] = items as unknown[];
+      }
+      
+      return realtimeMenu;
+    }
+    
+    // 並列処理完了後の最終結果がある場合はそれを使用
+    if (menuStoreState?.result?.menu_items && Array.isArray(menuStoreState.result.menu_items) && menuStoreState.result.menu_items.length > 0) {
+      console.log(`📋 [DataStore] Using parallel processing result: ${menuStoreState.result.menu_items.length} items`);
+      
+      // menu_itemsをカテゴリ別にグループ化（フォールバック：すべてを"メニュー"カテゴリに配置）
+      const groupedMenu: MenuData = {};
+      
+      // ProgressStoreからカテゴリ情報を取得してグループ化を試行
+      if (stageData.categories && Object.keys(stageData.categories).length > 0) {
+        // 既存のカテゴリ構造を使用してグループ化
+        const categoryNames = Object.keys(stageData.categories);
+        menuStoreState.result.menu_items.forEach((item: any, index: number) => {
+          // アイテムをカテゴリに割り当て（簡単な分散方法）
+          const categoryIndex = index % categoryNames.length;
+          const categoryName = categoryNames[categoryIndex];
+          
+          if (!groupedMenu[categoryName]) {
+            groupedMenu[categoryName] = [];
+          }
+          groupedMenu[categoryName].push(item);
+        });
+      } else {
+        // カテゴリ情報がない場合はアイテムの内容から推測
+        menuStoreState.result.menu_items.forEach((item: any) => {
+          const itemName = (item.japanese_name || item.english_name || '').toLowerCase();
+          let category = 'メニュー'; // デフォルトカテゴリ
+          
+          // 簡単なカテゴリ分類
+          if (itemName.includes('コーヒー') || itemName.includes('tea') || itemName.includes('ドリンク') || 
+              itemName.includes('coffee') || itemName.includes('juice') || itemName.includes('ティー')) {
+            category = 'ドリンク';
+          } else if (itemName.includes('ケーキ') || itemName.includes('プリン') || itemName.includes('ジェラート') || 
+                     itemName.includes('cake') || itemName.includes('dessert') || itemName.includes('sweet')) {
+            category = 'デザート';
+          }
+          
+          if (!groupedMenu[category]) {
+            groupedMenu[category] = [];
+          }
+          groupedMenu[category].push(item);
+        });
+      }
+      
+      return groupedMenu;
+    }
+    
     // Stage 5: 画像付き完全版
     if (currentStage >= 5 && stageData.finalMenuWithImages) {
       return stageData.finalMenuWithImages;
@@ -99,46 +170,10 @@ export const useDataStore = create<DataStore>(() => ({
 
   getFilteredItems: () => {
     const { ui } = useUIStore.getState();
-    // 循環参照を避けるため、直接getCurrentMenuDataのロジックを再利用
-    const { stageData, currentStage } = useProgressStore.getState();
     
-    let menuData: MenuData | null = null;
-    
-    // Stage 5: 画像付き完全版
-    if (currentStage >= 5 && stageData.finalMenuWithImages) {
-      menuData = stageData.finalMenuWithImages;
-    }
-    // Stage 4: 完全版（詳細説明付き）
-    else if (currentStage >= 4 && stageData.finalMenu) {
-      menuData = stageData.finalMenu;
-    }
-    // Stage 4進行中: リアルタイム部分結果をマージして表示
-    else if (currentStage === 4) {
-      if (stageData.realtimePartialResults && Object.keys(stageData.realtimePartialResults).length > 0) {
-        const baseData = stageData.translatedCategories || {};
-        const mergedData: Record<string, unknown[]> = {};
-        for (const [category, items] of Object.entries(baseData)) {
-          if (stageData.realtimePartialResults[category]) {
-            mergedData[category] = stageData.realtimePartialResults[category];
-          } else {
-            mergedData[category] = items;
-          }
-        }
-        menuData = mergedData;
-      } else if (stageData.partialMenu) {
-        menuData = stageData.partialMenu;
-      } else if (stageData.translatedCategories && stageData.show_translated_menu) {
-        menuData = stageData.translatedCategories;
-      }
-    }
-    // Stage 3: 翻訳版
-    else if (currentStage >= 3 && stageData.translatedCategories && stageData.show_translated_menu) {
-      menuData = stageData.translatedCategories;
-    }
-    // Stage 2: カテゴリ分析版
-    else if (currentStage >= 2 && stageData.categories) {
-      menuData = stageData.categories;
-    }
+    // getCurrentMenuDataを再利用して統一的なデータ取得
+    const dataStore = useDataStore.getState();
+    const menuData = dataStore.getCurrentMenuData();
     
     if (!menuData) return [];
     
@@ -155,45 +190,9 @@ export const useDataStore = create<DataStore>(() => ({
   },
 
   getCategoryList: (): string[] => {
-    const { stageData, currentStage } = useProgressStore.getState();
-    
-    let menuData: MenuData | null = null;
-    
-    // Stage 5: 画像付き完全版
-    if (currentStage >= 5 && stageData.finalMenuWithImages) {
-      menuData = stageData.finalMenuWithImages;
-    }
-    // Stage 4: 完全版（詳細説明付き）
-    else if (currentStage >= 4 && stageData.finalMenu) {
-      menuData = stageData.finalMenu;
-    }
-    // Stage 4進行中: リアルタイム部分結果をマージして表示  
-    else if (currentStage === 4) {
-      if (stageData.realtimePartialResults && Object.keys(stageData.realtimePartialResults).length > 0) {
-        const baseData = stageData.translatedCategories || {};
-        const mergedData: Record<string, unknown[]> = {};
-        for (const [category, items] of Object.entries(baseData)) {
-          if (stageData.realtimePartialResults[category]) {
-            mergedData[category] = stageData.realtimePartialResults[category];
-          } else {
-            mergedData[category] = items;
-          }
-        }
-        menuData = mergedData;
-      } else if (stageData.partialMenu) {
-        menuData = stageData.partialMenu;
-      } else if (stageData.translatedCategories && stageData.show_translated_menu) {
-        menuData = stageData.translatedCategories;
-      }
-    }
-    // Stage 3: 翻訳版
-    else if (currentStage >= 3 && stageData.translatedCategories && stageData.show_translated_menu) {
-      menuData = stageData.translatedCategories;
-    }
-    // Stage 2: カテゴリ分析版
-    else if (currentStage >= 2 && stageData.categories) {
-      menuData = stageData.categories;
-    }
+    // getCurrentMenuDataを再利用して統一的なデータ取得
+    const dataStore = useDataStore.getState();
+    const menuData = dataStore.getCurrentMenuData();
     
     return menuData ? Object.keys(menuData) : [];
   },

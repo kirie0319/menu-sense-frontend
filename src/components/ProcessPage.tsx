@@ -38,9 +38,14 @@ const ProcessPage = () => {
   }, [selectedFile, isLoading, currentStage, translateMenu, router]);
 
   useEffect(() => {
-    // Stage 2（カテゴライズ）完了後はメニューページに遷移
+    // 新しい並列処理システム：Stage 2完了後、少し待ってからメニューページに遷移
     if (currentStage >= 2) {
-      router.push('/menu');
+      // Stage 2完了後、並列処理が開始されるので少し待機してからメニューページに遷移
+      const timer = setTimeout(() => {
+        router.push('/menu');
+      }, 1500); // 1.5秒待機して並列処理の開始を確認
+      
+      return () => clearTimeout(timer);
     }
   }, [currentStage, router]);
 
@@ -201,7 +206,7 @@ const ProcessPage = () => {
                 <p className="font-medium">Menu Organization</p>
                 <p className="text-sm text-gray-600">
                   Intelligently categorizing and structuring the detected menu items
-                  {currentStage >= 2 && ' → Proceeding to menu page'}
+                  {currentStage >= 2 && ' → Starting parallel processing'}
                 </p>
               </div>
             </div>
@@ -213,9 +218,37 @@ const ProcessPage = () => {
                 {currentStage >= 3 ? '✓' : '3'}
               </div>
               <div>
-                <p className="font-medium">Translation & Details</p>
+                <p className="font-medium">Parallel Translation</p>
                 <p className="text-sm text-gray-600">
-                  Providing detailed translations, ingredients, and cultural context
+                  Using multiple AI services simultaneously for fast, accurate translations
+                </p>
+              </div>
+            </div>
+
+            <div className={`flex items-start space-x-3 ${currentStage >= 4 ? 'text-green-600' : 'text-gray-400'}`}>
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold ${
+                currentStage >= 4 ? 'bg-green-100' : 'bg-gray-100'
+              }`}>
+                {currentStage >= 4 ? '✓' : '4'}
+              </div>
+              <div>
+                <p className="font-medium">AI Description Generation</p>
+                <p className="text-sm text-gray-600">
+                  Generating detailed descriptions with ingredients, preparation methods, and cultural context
+                </p>
+              </div>
+            </div>
+
+            <div className={`flex items-start space-x-3 ${currentStage >= 5 ? 'text-green-600' : 'text-gray-400'}`}>
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold ${
+                currentStage >= 5 ? 'bg-green-100' : 'bg-gray-100'
+              }`}>
+                {currentStage >= 5 ? '✓' : '5'}
+              </div>
+              <div>
+                <p className="font-medium">AI Image Generation</p>
+                <p className="text-sm text-gray-600">
+                  Creating visual representations of dishes using Google Imagen 3
                 </p>
               </div>
             </div>

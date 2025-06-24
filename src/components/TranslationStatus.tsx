@@ -332,41 +332,50 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
             );
           })()}
           
-          {/* Stage3 詳細進捗表示 */}
+          {/* Stage3 並列翻訳進捗表示 */}
           {currentStage === 3 && (
             <div className="space-y-1">
               {stage3Completed || (stageData as any)?.stage3_completed || (stageData as any)?.show_translated_menu ? (
                 <div className="bg-green-50 rounded-lg p-2 border border-green-200">
                   <p className="text-xs sm:text-sm text-green-800 font-medium">
-                    🎉 All {realtimeMenuItems.length} items translated successfully!
+                    🚀 Parallel translation completed! ({realtimeMenuItems.length} items)
                   </p>
-                  {stageData && (stageData as any).translation_method && (
-                    <p className="text-xs text-green-600">
-                      Method: {(stageData as any).translation_method === 'google_translate' ? 'Google Translate API' : 'OpenAI'}
-                    </p>
-                  )}
                   <p className="text-xs text-green-600">
-                    ✨ Now adding detailed descriptions...
+                    ⚡ Powered by Google Translate API + OpenAI
+                  </p>
+                  <p className="text-xs text-green-600">
+                    ✨ Starting detailed descriptions generation...
                   </p>
                 </div>
               ) : (
                 <>
                   <p className="text-xs sm:text-sm text-gray-600">
-                    {realtimeMenuItems.filter(item => item.isTranslated).length} of {realtimeMenuItems.length} items translated
+                    🌍 Parallel translation: {realtimeMenuItems.filter(item => item.isTranslated).length} of {realtimeMenuItems.length} items
                   </p>
                   {stageData && (stageData as any).processing_category && (
                     <div className="flex items-center justify-center space-x-2">
                       <span className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span>
                       <p className="text-xs text-orange-600 font-medium">
-                        Translating: {(stageData as any).processing_category}
+                        ⚡ Processing: {(stageData as any).processing_category}
                       </p>
                     </div>
                   )}
-                  {stageData && (stageData as any).progress_percent && (
-                    <p className="text-xs text-blue-600">
-                      {Math.round((stageData as any).progress_percent)}% complete
-                    </p>
+                  
+                  {/* 並列処理統計 */}
+                  {stageData && (stageData as any).completed_items && (stageData as any).total_items && (
+                    <div className="space-y-1">
+                      <p className="text-xs text-blue-600">
+                        🔄 Progress: {(stageData as any).completed_items}/{(stageData as any).total_items} ({Math.round((stageData as any).progress_percentage || 0)}%)
+                      </p>
+                      <div className="w-full bg-gray-200 rounded-full h-1">
+                        <div 
+                          className="bg-gradient-to-r from-blue-500 to-green-500 h-1 rounded-full transition-all duration-500"
+                          style={{ width: `${(stageData as any).progress_percentage || 0}%` }}
+                        ></div>
+                      </div>
+                    </div>
                   )}
+                  
                   {stageData && (stageData as any).elapsed_time && (
                     <p className="text-xs text-gray-500">
                       Elapsed: {Math.round((stageData as any).elapsed_time / 1000)}s
@@ -377,27 +386,94 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
             </div>
           )}
 
-          {/* Stage4 詳細進捗表示（リアルタイム強化） */}
+          {/* Stage4-6 並列詳細説明・画像生成進捗表示 */}
           {currentStage >= 4 && (() => {
             const overallProgress = getOverallProgress();
             const currentProcessing = storeStageData?.processingCategory || (stageData as any)?.processing_category;
             const recentCompletion = storeStageData?.categoryCompleted;
             const chunkProgress = storeStageData?.chunkProgress;
             
+            // 新しい並列処理システムのデータも参照
+            const parallelData = stageData as any;
+            const completedItems = parallelData?.completed_items || 0;
+            const totalItems = parallelData?.total_items || 0;
+            const progressPercentage = parallelData?.progress_percentage || 0;
+            
             return (
               <div className="space-y-1">
-                {/* 全体進捗表示（リアルタイム） */}
-                {overallProgress ? (
+                {/* ステージ別ヘッダー */}
+                <div className="flex items-center justify-center space-x-2 mb-1">
+                  {currentStage === 4 && (
+                    <>
+                      <span className="text-lg">🤖</span>
+                      <span className="text-xs font-semibold text-purple-600">
+                        Parallel AI Description Generation
+                      </span>
+                    </>
+                  )}
+                  {currentStage === 5 && (
+                    <>
+                      <span className="text-lg">🎨</span>
+                      <span className="text-xs font-semibold text-pink-600">
+                        AI Image Generation (Google Imagen 3)
+                      </span>
+                    </>
+                  )}
+                  {currentStage === 6 && (
+                    <>
+                      <span className="text-lg">✨</span>
+                      <span className="text-xs font-semibold text-green-600">
+                        Finalizing Results
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                {/* 並列処理統計優先表示 */}
+                {(completedItems > 0 || totalItems > 0) ? (
+                  <div className="space-y-1">
+                    <p className="text-xs sm:text-sm text-gray-600">
+                      🚀 Parallel processing: {completedItems} of {totalItems} items completed
+                    </p>
+                    
+                    {/* 並列進捗バー */}
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div 
+                        className={`h-2 rounded-full transition-all duration-500 ${
+                          currentStage === 4 ? 'bg-gradient-to-r from-purple-500 to-blue-500' :
+                          currentStage === 5 ? 'bg-gradient-to-r from-pink-500 to-red-500' :
+                          'bg-gradient-to-r from-green-500 to-emerald-500'
+                        }`}
+                        style={{ width: `${progressPercentage}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-xs text-gray-700 font-medium">
+                      {Math.round(progressPercentage)}% complete
+                    </p>
+                    
+                    {/* API統計情報 */}
+                    {parallelData?.api_stats && (
+                      <div className="bg-blue-50 rounded-lg p-2 border border-blue-200">
+                        <p className="text-xs text-blue-800 font-medium">API Progress:</p>
+                        <div className="text-xs text-blue-600 space-y-0.5">
+                          <div>🌍 Translation: {parallelData.api_stats.translation_completed || 0}</div>
+                          <div>📝 Description: {parallelData.api_stats.description_completed || 0}</div>
+                          <div>🎨 Image: {parallelData.api_stats.image_completed || 0}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : overallProgress ? (
                   <div className="space-y-1">
                     <p className="text-xs sm:text-sm text-gray-600">
                       {overallProgress.completedItems + overallProgress.partialItems} of {overallProgress.totalItems} items processed
                     </p>
                     <p className="text-xs text-gray-500">
                       Complete: {overallProgress.completedItems} | 
-                      Updating: {overallProgress.partialItems}
+                      Processing: {overallProgress.partialItems}
                     </p>
                     
-                    {/* 全体進捗バー */}
+                    {/* レガシー進捗バー */}
                     <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
                       <div 
                         className="bg-gradient-to-r from-green-500 to-blue-500 h-1 rounded-full transition-all duration-500"
@@ -415,17 +491,17 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
                     </p>
                     <p className="text-xs text-gray-500">
                       Complete: {realtimeMenuItems.filter(item => item.isComplete).length} | 
-                      Updating: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length}
+                      Processing: {realtimeMenuItems.filter(item => item.isPartiallyComplete).length}
                     </p>
                   </div>
                 )}
                 
-                {/* 現在処理中のカテゴリ */}
+                {/* 現在処理中のカテゴリ（どちらのデータソースでも表示） */}
                 {currentProcessing && (
                   <div className="flex items-center justify-center space-x-2">
-                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                    <p className="text-xs text-green-600 font-medium">
-                      Detailing: {currentProcessing}
+                    <span className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span>
+                    <p className="text-xs text-orange-600 font-medium">
+                      🔄 Processing: {currentProcessing}
                     </p>
                     {chunkProgress && (
                       <span className="text-xs text-gray-500">
@@ -436,7 +512,7 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
                 )}
                 
                 {/* 最新カテゴリ完了通知 */}
-                {recentCompletion && Date.now() - recentCompletion.timestamp < 10000 && (
+                {recentCompletion && Date.now() - recentCompletion.timestamp < 15000 && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
@@ -444,27 +520,23 @@ const TranslationStatus: React.FC<TranslationStatusProps> = ({
                     className="bg-green-50 rounded-lg p-2 border border-green-200"
                   >
                     <p className="text-xs text-green-800 font-medium">
-                      🎯 {recentCompletion.name} completed!
+                      ✅ {recentCompletion.name} completed!
                     </p>
                     <p className="text-xs text-green-600">
-                      {recentCompletion.items.length} items with detailed descriptions
+                      {recentCompletion.items.length} items with {currentStage >= 5 ? 'AI images' : 'detailed descriptions'}
                     </p>
                   </motion.div>
                 )}
                 
-                {/* チャンク進捗の表示 */}
-                {chunkProgress && (
-                  <div className="bg-blue-50 rounded-lg p-2 border border-blue-200">
-                    <p className="text-xs text-blue-800 font-medium">
-                      📦 Processing {chunkProgress.category}: Chunk {chunkProgress.completed}/{chunkProgress.total}
-                    </p>
-                  </div>
-                )}
-                
-                {/* フォールバック進捗 */}
-                {!overallProgress && stageData && (stageData as any).progress_percent && (
-                  <p className="text-xs text-green-600">
-                    {Math.round((stageData as any).progress_percent)}% complete
+                {/* パフォーマンス情報 */}
+                {parallelData?.elapsed_time && (
+                  <p className="text-xs text-gray-500">
+                    ⏱️ Elapsed: {Math.round(parallelData.elapsed_time / 1000)}s
+                    {parallelData.api_integration && (
+                      <span className="text-xs text-blue-600 ml-2">
+                        ({parallelData.api_integration})
+                      </span>
+                    )}
                   </p>
                 )}
               </div>
