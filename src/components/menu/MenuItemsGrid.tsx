@@ -5,6 +5,8 @@ import { Heart } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMenuStore } from '@/lib/store';
 import { useUIStore } from '@/lib/stores/uiStore';
+import { useDataStore } from '@/lib/stores/dataStore';
+import { t } from '@/lib/i18n';
 
 export const MenuItemsGrid: React.FC = () => {
   // UI関連は新しいUIStoreから取得
@@ -17,11 +19,24 @@ export const MenuItemsGrid: React.FC = () => {
     hasGeneratedImages
   } = useMenuStore();
 
+  // デバッグ用データストア
+  const { testS3ImageMatching } = useDataStore();
+
   const [newItemAnimations, setNewItemAnimations] = useState<Set<string>>(new Set());
   const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
   const [imageLoading, setImageLoading] = useState<Set<string>>(new Set());
 
   const filteredItems = getFilteredItems();
+
+  // 詳細なメニューデータデバッグ
+  useEffect(() => {
+    console.log(`🔍 [MenuItemsGrid] Menu data debug:`, {
+      filteredItemsCount: filteredItems.length,
+      hasGeneratedImages: hasGeneratedImages(),
+      selectedCategory: ui.selectedCategory,
+      filteredItems: filteredItems.slice(0, 3) // 最初の3項目のみ表示
+    });
+  }, [filteredItems, hasGeneratedImages, ui.selectedCategory]);
 
   // 画像生成状況のデバッグ情報
   useEffect(() => {
@@ -62,6 +77,17 @@ export const MenuItemsGrid: React.FC = () => {
     setImageLoading(prev => new Set(prev).add(itemId));
   };
 
+  // S3テスト機能
+  const handleS3Test = async () => {
+    console.log(`🧪 [MenuItemsGrid] Starting S3 image matching test...`);
+    try {
+      const cacheCount = await testS3ImageMatching();
+      console.log(`✅ [MenuItemsGrid] S3 test completed! Cache contains ${cacheCount} images`);
+    } catch (error) {
+      console.error(`❌ [MenuItemsGrid] S3 test failed:`, error);
+    }
+  };
+
   if (filteredItems.length === 0) {
     return (
       <motion.div
@@ -70,8 +96,19 @@ export const MenuItemsGrid: React.FC = () => {
         className="text-center py-12 md:py-16"
       >
         <div className="text-6xl md:text-8xl mb-4 md:mb-6">🔍</div>
-        <h3 className="text-xl md:text-2xl font-bold text-gray-700 mb-2 md:mb-4">No menu items found</h3>
-        <p className="text-gray-500 text-sm md:text-base">Try selecting a different category</p>
+        <h3 className="text-xl md:text-2xl font-bold text-gray-700 mb-2 md:mb-4">{t('noMenuItemsFound')}</h3>
+        <p className="text-gray-500 text-sm md:text-base">{t('tryDifferentCategory')}</p>
+        
+        {/* デバッグ用S3テストボタン */}
+        <div className="mt-8">
+          <button
+            onClick={handleS3Test}
+            className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200"
+          >
+            🧪 Test S3 Image Matching
+          </button>
+          <p className="text-xs text-gray-400 mt-2">Debug: Test S3 image fetching (check console)</p>
+        </div>
       </motion.div>
     );
   }
@@ -107,9 +144,25 @@ export const MenuItemsGrid: React.FC = () => {
             const numPrice = parseInt(cleanPrice, 10);
             return isNaN(numPrice) ? 0 : numPrice;
           };
+          
           const defaultEmoji = String(itemObj.image || '🍽️');
           const generatedImageUrl = getGeneratedImageUrl(itemObj);
-          const hasImage = hasGeneratedImages() && generatedImageUrl && !imageErrors.has(itemId);
+          
+          // 詳細なデバッグ情報
+          const debugHasGeneratedImages = hasGeneratedImages();
+          const debugImageErrors = imageErrors.has(itemId);
+          const hasImage = debugHasGeneratedImages && generatedImageUrl && !debugImageErrors;
+          
+          // 画像表示ロジックの詳細ログ
+          console.log(`🖼️ [MenuItemsGrid] Image debug for "${name}":`, {
+            itemId,
+            hasGeneratedImages: debugHasGeneratedImages,
+            generatedImageUrl,
+            imageErrors: debugImageErrors,
+            hasImageFinal: hasImage,
+            itemObj: { ...itemObj, image: itemObj.image }
+          });
+          
           const isLoadingImage = imageLoading.has(itemId);
           
           const tags = Array.isArray(itemObj.tags) ? itemObj.tags.map(String) : ['Japanese'];
@@ -154,7 +207,7 @@ export const MenuItemsGrid: React.FC = () => {
                 scale: 0.96,
                 transition: { duration: 0.1, ease: "easeInOut" }
               }}
-              className={`relative bg-white rounded-3xl md:rounded-4xl shadow-lg md:shadow-xl border border-gray-100 overflow-hidden hover:shadow-xl md:hover:shadow-2xl transition-all duration-300 cursor-pointer group ${
+              className={`relative bg-white rounded-2xl md:rounded-3xl shadow-lg md:shadow-xl border border-gray-100 overflow-hidden hover:shadow-xl md:hover:shadow-2xl transition-all duration-300 cursor-pointer group ${
                 isNewItem ? 'animate-pulse border-green-300 shadow-green-200' : ''
               }`}
               onClick={handleCardClick}
@@ -162,111 +215,114 @@ export const MenuItemsGrid: React.FC = () => {
               style={{
                 backdropFilter: 'blur(20px)',
                 WebkitBackdropFilter: 'blur(20px)',
+                aspectRatio: '1 / 1.3'
               }}
             >
-              <div className="p-5 md:p-7">
-                <div className="flex justify-between items-start">
-                  <div className="flex-1 pr-4 md:pr-6 min-w-0">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center min-w-0">
-                            <h3 className="text-lg md:text-xl font-bold text-gray-900 truncate transition-all duration-300 group-hover:text-orange-600">
-                              {name}
-                            </h3>
-                          </div>
-                          <div className="text-xl md:text-2xl font-bold text-green-600 ml-3 flex-shrink-0 bg-green-50 px-3 py-1 rounded-xl">
-                            {(() => {
-                              const priceNum = extractPriceNumber(price);
-                              return priceNum > 0 ? `¥${priceNum.toLocaleString()}` : 'TBD';
-                            })()}
-                          </div>
-                        </div>
-                        <p className="text-sm md:text-base text-gray-600 truncate mb-1">{originalName}</p>
-                        {subtitle && (
-                          <p className="text-xs md:text-sm text-gray-500 truncate">{subtitle}</p>
-                        )}
+              {/* Image Section - Top 60-70% */}
+              <div className="relative h-[60%] bg-gradient-to-br from-orange-100 via-yellow-100 to-red-100 overflow-hidden">
+                {hasImage ? (
+                  <>
+                    {isLoadingImage && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-orange-50 to-yellow-50">
+                        <div className="animate-spin rounded-full h-12 w-12 border-3 border-orange-500 border-t-transparent"></div>
                       </div>
-                    </div>
-                    
-                    <p className="text-sm md:text-base text-gray-700 leading-relaxed mb-4 line-clamp-2 md:line-clamp-3">
-                      {truncatedDescription}
-                    </p>
-
-                    <div className="flex items-center justify-between">
-                      <div className="flex flex-wrap gap-2">
-                        {tags.slice(0, 2).map((tag, tagIndex) => (
-                          <span 
-                            key={tagIndex} 
-                            className="text-xs bg-gradient-to-r from-blue-100 to-purple-100 text-blue-800 px-3 py-1.5 rounded-full font-medium transition-all duration-200 hover:from-blue-200 hover:to-purple-200"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                        {spiceLevel > 0 && (
-                          <span className="text-xs bg-gradient-to-r from-orange-100 to-red-100 text-orange-800 px-3 py-1.5 rounded-full font-medium flex items-center">
-                            {'🌶️'.repeat(Math.min(spiceLevel, 3))}
-                          </span>
-                        )}
-                      </div>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleFavorite(itemId);
-                        }}
-                        className="p-3 ml-3 flex-shrink-0 hover:scale-110 transition-all duration-200 rounded-full hover:bg-red-50 min-w-[48px] min-h-[48px] flex items-center justify-center active:scale-95"
-                      >
-                        <Heart 
-                          size={20} 
-                          className={`transition-all duration-200 ${
-                            isFavorite 
-                              ? 'text-red-500 fill-current scale-110' 
-                              : 'text-gray-400 hover:text-red-400'
-                          }`} 
-                        />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="w-20 h-20 md:w-28 md:h-28 bg-gradient-to-br from-orange-100 via-yellow-100 to-red-100 rounded-2xl md:rounded-3xl flex items-center justify-center text-3xl md:text-5xl flex-shrink-0 group-hover:scale-105 transition-all duration-300 relative overflow-hidden shadow-lg">
-                    {hasImage ? (
-                      <>
-                        {isLoadingImage && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-orange-50 to-yellow-50">
-                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-orange-500 border-t-transparent"></div>
-                          </div>
-                        )}
-                        <img
-                          src={generatedImageUrl}
-                          alt={name}
-                          className={`w-full h-full object-cover rounded-2xl md:rounded-3xl transition-all duration-300 ${
-                            isLoadingImage ? 'opacity-0' : 'opacity-100'
-                          }`}
-                          onLoad={() => handleImageLoad(itemId)}
-                          onError={() => handleImageError(itemId)}
-                          onLoadStart={() => handleImageLoadStart(itemId)}
-                        />
-                      </>
-                    ) : (
-                      <span className="text-3xl md:text-5xl filter drop-shadow-sm">{defaultEmoji}</span>
                     )}
-                    
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-2xl md:rounded-3xl"></div>
+                    <img
+                      src={generatedImageUrl}
+                      alt={name}
+                      className={`w-full h-full object-cover transition-all duration-300 group-hover:scale-105 ${
+                        isLoadingImage ? 'opacity-0' : 'opacity-100'
+                      }`}
+                      onLoad={() => handleImageLoad(itemId)}
+                      onError={() => handleImageError(itemId)}
+                      onLoadStart={() => handleImageLoadStart(itemId)}
+                    />
+                  </>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-6xl md:text-8xl filter drop-shadow-sm group-hover:scale-105 transition-all duration-300">
+                    {defaultEmoji}
+                  </div>
+                )}
+                
+                {/* Favorite button positioned on image */}
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFavorite(itemId);
+                  }}
+                  className="absolute top-3 right-3 p-2.5 bg-white bg-opacity-90 backdrop-blur-sm rounded-full hover:bg-opacity-100 transition-all duration-200 shadow-lg hover:scale-110 active:scale-95"
+                >
+                  <Heart 
+                    size={18} 
+                    className={`transition-all duration-200 ${
+                      isFavorite 
+                        ? 'text-red-500 fill-current scale-110' 
+                        : 'text-gray-600 hover:text-red-400'
+                    }`} 
+                  />
+                </button>
+
+                {/* Gradient overlay */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+              </div>
+
+              {/* Content Section - Bottom 30-40% */}
+              <div className="h-[40%] p-4 md:p-5 flex flex-col justify-between bg-white">
+                <div className="flex-1">
+                  {/* Title and Price Row */}
+                  <div className="flex items-start justify-between mb-2">
+                    <h3 className="text-base md:text-lg font-bold text-gray-900 leading-tight group-hover:text-orange-600 transition-colors duration-300 flex-1 pr-2">
+                      {name}
+                    </h3>
+                    <div className="text-lg md:text-xl font-bold text-green-600 flex-shrink-0">
+                      {(() => {
+                        const priceNum = extractPriceNumber(price);
+                        return priceNum > 0 ? `¥${priceNum.toLocaleString()}` : t('priceTBD');
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Original name */}
+                  <p className="text-sm text-gray-600 truncate mb-2">{originalName}</p>
+                  
+                  {/* Description */}
+                  <p className="text-sm text-gray-700 leading-relaxed line-clamp-2 mb-3">
+                    {truncatedDescription}
+                  </p>
+                </div>
+
+                {/* Tags and spice level at bottom */}
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap gap-1.5">
+                    {tags.slice(0, 2).map((tag, tagIndex) => (
+                      <span 
+                        key={tagIndex} 
+                        className="text-xs bg-gradient-to-r from-blue-100 to-purple-100 text-blue-800 px-2.5 py-1 rounded-full font-medium"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                    {spiceLevel > 0 && (
+                      <span className="text-xs bg-gradient-to-r from-orange-100 to-red-100 text-orange-800 px-2.5 py-1 rounded-full font-medium flex items-center">
+                        {'🌶️'.repeat(Math.min(spiceLevel, 3))}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
 
-              <div className="absolute bottom-4 right-4 opacity-70 group-hover:opacity-100 transition-opacity duration-200">
-                <div className="flex items-center text-xs text-orange-600 bg-white bg-opacity-90 rounded-full px-3 py-1.5 shadow-sm backdrop-blur-sm">
-                  <div className="w-2 h-2 bg-orange-400 rounded-full animate-pulse mr-2"></div>
-                  <span className="hidden sm:inline font-medium">タップして詳細</span>
-                  <span className="sm:hidden font-medium">詳細</span>
+              {/* Tap for details indicator */}
+              <div className="absolute bottom-3 right-3 opacity-70 group-hover:opacity-100 transition-opacity duration-200">
+                <div className="flex items-center text-xs text-orange-600 bg-white bg-opacity-95 rounded-full px-2.5 py-1 shadow-sm backdrop-blur-sm">
+                  <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse mr-1.5"></div>
+                  <span className="font-medium">{t('details')}</span>
                 </div>
               </div>
 
-              <div className="absolute inset-0 bg-gradient-to-r from-orange-500/3 to-pink-500/3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-3xl md:rounded-4xl pointer-events-none"></div>
+              {/* Hover effects */}
+              <div className="absolute inset-0 bg-gradient-to-r from-orange-500/3 to-pink-500/3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-2xl md:rounded-3xl pointer-events-none"></div>
               
-              <div className="absolute inset-0 rounded-3xl md:rounded-4xl border border-transparent bg-gradient-to-r from-orange-500/10 to-pink-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
+              <div className="absolute inset-0 rounded-2xl md:rounded-3xl border border-transparent bg-gradient-to-r from-orange-500/10 to-pink-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
             </motion.div>
           );
         })}

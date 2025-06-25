@@ -4,6 +4,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useMenuStore } from '@/lib/store';
 import { useUIStore } from '@/lib/stores/uiStore';
+import { t } from '@/lib/i18n';
 
 export const MenuCategories: React.FC = () => {
   // UI関連は新しいUIStoreから取得
@@ -31,7 +32,7 @@ export const MenuCategories: React.FC = () => {
       {/* シンプルなヘッダー - 余白なし */}
       <div className="px-4 md:px-6 pt-4 md:pt-6 pb-6">
         <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
-          Menu Categories
+          {t('menuCategories')}
         </h1>
       </div>
 
@@ -48,7 +49,7 @@ export const MenuCategories: React.FC = () => {
             }`}
             whileTap={{ scale: 0.98 }}
           >
-            All
+            {t('allCategories')}
             
             {/* アクティブタブの下線アニメーション */}
             {ui.selectedCategory === 'all' && (

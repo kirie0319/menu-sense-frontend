@@ -978,8 +978,153 @@ export class MenuTranslationApi {
     try {
       const response = await api.get('/health');
       return response.data;
-    } catch {
+    } catch (error) {
+      console.error('Health check failed:', error);
       throw new Error('Backend server is not responding');
+    }
+  }
+
+  // === S3 Image Management API ===
+  
+  /**
+   * S3から最新の画像を取得
+   */
+  static async getRecentImages(limit: number = 20): Promise<any> {
+    try {
+      const response = await api.get(`/images/recent?limit=${limit}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get recent images:', error);
+      if (axios.isAxiosError(error) && error.response?.data) {
+        throw new Error(error.response.data.detail || 'Failed to get recent images');
+      }
+      throw new Error('Failed to get recent images');
+    }
+  }
+
+  /**
+   * S3から画像リストを取得
+   */
+  static async listImages(prefix?: string, maxKeys: number = 100): Promise<any> {
+    try {
+      const params = new URLSearchParams();
+      if (prefix) params.append('prefix', prefix);
+      params.append('max_keys', maxKeys.toString());
+      
+      const response = await api.get(`/images/list?${params.toString()}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to list images:', error);
+      if (axios.isAxiosError(error) && error.response?.data) {
+        throw new Error(error.response.data.detail || 'Failed to list images');
+      }
+      throw new Error('Failed to list images');
+    }
+  }
+
+  /**
+   * ファイル名で画像を検索
+   */
+  static async searchImages(filename: string): Promise<any> {
+    try {
+      const response = await api.get(`/images/search?filename=${encodeURIComponent(filename)}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to search images:', error);
+      if (axios.isAxiosError(error) && error.response?.data) {
+        throw new Error(error.response.data.detail || 'Failed to search images');
+      }
+      throw new Error('Failed to search images');
+    }
+  }
+
+  /**
+   * 日付で画像を取得
+   */
+  static async getImagesByDate(date: string): Promise<any> {
+    try {
+      const response = await api.get(`/images/by-date?date=${encodeURIComponent(date)}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get images by date:', error);
+      if (axios.isAxiosError(error) && error.response?.data) {
+        throw new Error(error.response.data.detail || 'Failed to get images by date');
+      }
+      throw new Error('Failed to get images by date');
+    }
+  }
+
+  /**
+   * S3画像ギャラリーを取得（ページネーション付き）
+   */
+  static async getImageGallery(
+    page: number = 1, 
+    perPage: number = 20, 
+    sortBy: 'recent' | 'name' | 'size' = 'recent'
+  ): Promise<any> {
+    try {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        per_page: perPage.toString(),
+        sort_by: sortBy
+      });
+      
+      const response = await api.get(`/images/gallery?${params.toString()}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get image gallery:', error);
+      if (axios.isAxiosError(error) && error.response?.data) {
+        throw new Error(error.response.data.detail || 'Failed to get image gallery');
+      }
+      throw new Error('Failed to get image gallery');
+    }
+  }
+
+  /**
+   * S3画像統計情報を取得
+   */
+  static async getImageStats(): Promise<any> {
+    try {
+      const response = await api.get('/images/stats');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get image stats:', error);
+      if (axios.isAxiosError(error) && error.response?.data) {
+        throw new Error(error.response.data.detail || 'Failed to get image stats');
+      }
+      throw new Error('Failed to get image stats');
+    }
+  }
+
+  /**
+   * S3接続状態を確認
+   */
+  static async getS3Status(): Promise<any> {
+    try {
+      const response = await api.get('/images/status');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get S3 status:', error);
+      if (axios.isAxiosError(error) && error.response?.data) {
+        throw new Error(error.response.data.detail || 'Failed to get S3 status');
+      }
+      throw new Error('Failed to get S3 status');
+    }
+  }
+
+  /**
+   * 特定の画像情報を取得
+   */
+  static async getImageInfo(key: string): Promise<any> {
+    try {
+      const response = await api.get(`/images/info/${encodeURIComponent(key)}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get image info:', error);
+      if (axios.isAxiosError(error) && error.response?.data) {
+        throw new Error(error.response.data.detail || 'Failed to get image info');
+      }
+      throw new Error('Failed to get image info');
     }
   }
 } 

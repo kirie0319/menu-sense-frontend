@@ -5,16 +5,23 @@ import { X, Heart, AlertTriangle, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence, PanInfo } from 'framer-motion';
 import { useMenuStore } from '@/lib/store';
 import { useUIStore } from '@/lib/stores/uiStore';
+import { t, getSpiceLevelText } from '@/lib/i18n';
 
 export const MenuItemDetail: React.FC = () => {
   // UI関連は新しいUIStoreから取得
   const { ui, hideItemDetail, toggleFavorite } = useUIStore();
   
   // データ関連は既存ストアから継続取得
-  const { getFilteredItems } = useMenuStore();
+  const { 
+    getFilteredItems,
+    getGeneratedImageUrl,
+    hasGeneratedImages
+  } = useMenuStore();
 
   // スライドアップ用の状態管理
   const [dragY, setDragY] = useState(0);
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
+  const [imageLoading, setImageLoading] = useState<Set<string>>(new Set());
 
   const filteredItems = getFilteredItems();
   const selectedItem = filteredItems.find((item, index) => {
@@ -112,15 +119,44 @@ export const MenuItemDetail: React.FC = () => {
   };
   const subtitle = String(itemObj.subtitle || '');
   const image = String(itemObj.image || '🍽️');
-  const ingredients = String(itemObj.ingredients || 'Please ask staff for detailed ingredient information');
-  const cookingMethod = String(itemObj.cookingMethod || itemObj.cooking_method || 'Please ask staff about preparation methods');
-  const culturalNote = String(itemObj.culturalNote || itemObj.cultural_note || 'Ask our staff about the cultural background and traditional preparation of this dish');
+  const ingredients = String(itemObj.ingredients || t('askStaffForIngredients'));
+  const cookingMethod = String(itemObj.cookingMethod || itemObj.cooking_method || t('askStaffForCookingMethod'));
+  const culturalNote = String(itemObj.culturalNote || itemObj.cultural_note || t('askStaffForCulturalNote'));
   const allergens = Array.isArray(itemObj.allergens) && itemObj.allergens.length > 0 
     ? itemObj.allergens.map(String) 
-    : ['Soy', 'Gluten', 'Please ask staff'];
+    : t('defaultAllergens').split(', ');
   const tags = Array.isArray(itemObj.tags) ? itemObj.tags.map(String) : ['Japanese', 'Traditional'];
   const spiceLevel = Number(itemObj.spice_level || itemObj.spiceLevel || 1);
   const isFavorite = ui.favorites.has(itemId);
+
+  // 画像処理関数
+  const handleImageLoad = (itemId: string) => {
+    setImageLoading(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(itemId);
+      return newSet;
+    });
+  };
+
+  const handleImageError = (itemId: string) => {
+    setImageErrors(prev => new Set(prev).add(itemId));
+    setImageLoading(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(itemId);
+      return newSet;
+    });
+  };
+
+  const handleImageLoadStart = (itemId: string) => {
+    setImageLoading(prev => new Set(prev).add(itemId));
+  };
+
+  // 画像表示ロジック
+  const generatedImageUrl = getGeneratedImageUrl(itemObj);
+  const debugHasGeneratedImages = hasGeneratedImages();
+  const debugImageErrors = imageErrors.has(itemId);
+  const hasImage = debugHasGeneratedImages && generatedImageUrl && !debugImageErrors;
+  const isLoadingImage = imageLoading.has(itemId);
 
   // ドラッグでの閉じる処理
   const handleDragEnd = (event: any, info: PanInfo) => {
@@ -186,8 +222,28 @@ export const MenuItemDetail: React.FC = () => {
               {/* Layout optimized for full view */}
               <div className="flex items-start space-x-6">
                 {/* Image */}
-                <div className="w-32 h-32 bg-gradient-to-br from-orange-100 via-yellow-100 to-pink-100 rounded-3xl flex items-center justify-center text-6xl flex-shrink-0 shadow-lg">
-                  {image}
+                <div className="w-32 h-32 bg-gradient-to-br from-orange-100 via-yellow-100 to-pink-100 rounded-3xl flex items-center justify-center text-6xl flex-shrink-0 shadow-lg relative overflow-hidden">
+                  {hasImage ? (
+                    <>
+                      {isLoadingImage && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-orange-50 to-yellow-50">
+                          <div className="animate-spin rounded-full h-12 w-12 border-3 border-orange-500 border-t-transparent"></div>
+                        </div>
+                      )}
+                      <img
+                        src={generatedImageUrl}
+                        alt={name}
+                        className={`w-full h-full object-cover rounded-3xl transition-all duration-300 ${
+                          isLoadingImage ? 'opacity-0' : 'opacity-100'
+                        }`}
+                        onLoad={() => handleImageLoad(itemId)}
+                        onError={() => handleImageError(itemId)}
+                        onLoadStart={() => handleImageLoadStart(itemId)}
+                      />
+                    </>
+                  ) : (
+                    <span className="text-6xl filter drop-shadow-sm">{image}</span>
+                  )}
                 </div>
                 
                 {/* Basic info */}
@@ -202,7 +258,7 @@ export const MenuItemDetail: React.FC = () => {
                   <div className="text-2xl md:text-3xl font-bold text-green-600 bg-green-50 px-4 py-2 rounded-2xl inline-block">
                     {(() => {
                       const priceNum = extractPriceNumber(price);
-                      return priceNum > 0 ? `¥${priceNum.toLocaleString()}` : 'Price TBD';
+                      return priceNum > 0 ? `¥${priceNum.toLocaleString()}` : t('priceTBD');
                     })()}
                   </div>
                 </div>
@@ -233,7 +289,7 @@ export const MenuItemDetail: React.FC = () => {
                     className="h-5 w-5" 
                     fill={isFavorite ? 'currentColor' : 'none'}
                   />
-                  <span>{isFavorite ? 'お気に入りから削除' : 'お気に入りに追加'}</span>
+                  <span>{isFavorite ? t('removeFromFavorites') : t('addToFavorites')}</span>
                 </motion.button>
               </div>
             </div>
@@ -251,7 +307,7 @@ export const MenuItemDetail: React.FC = () => {
                   className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-6 border border-blue-100"
                 >
                   <h3 className="text-xl font-semibold text-blue-900 mb-4 flex items-center">
-                    📝 Description
+                    📝 {t('description')}
                   </h3>
                   <p className="text-blue-800 leading-relaxed text-lg">
                     {description}
@@ -268,7 +324,7 @@ export const MenuItemDetail: React.FC = () => {
                   className="bg-gradient-to-r from-orange-50 to-red-50 border-2 border-orange-200 rounded-2xl p-6"
                 >
                   <h3 className="font-semibold text-orange-800 mb-4 flex items-center text-xl">
-                    🌶️ Spice Level
+                    🌶️ {t('spiceLevel')}
                   </h3>
                   <div className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-4">
                     <div className="flex space-x-1">
@@ -284,7 +340,7 @@ export const MenuItemDetail: React.FC = () => {
                       ))}
                     </div>
                     <span className="text-orange-700 font-medium text-lg bg-orange-100 px-4 py-2 rounded-xl">
-                      {spiceLevel}/5 - {spiceLevel >= 4 ? 'Very Spicy' : spiceLevel >= 3 ? 'Spicy' : spiceLevel >= 2 ? 'Medium' : 'Mild'}
+                      {spiceLevel}/5 - {getSpiceLevelText(spiceLevel)}
                     </span>
                   </div>
                 </motion.div>
@@ -300,7 +356,7 @@ export const MenuItemDetail: React.FC = () => {
                 >
                   <h3 className="font-semibold text-red-800 mb-4 flex items-center text-xl">
                     <AlertTriangle className="w-6 h-6 mr-3" />
-                    Allergen Information
+                    {t('allergenInformation')}
                   </h3>
                   <div className="flex flex-wrap gap-3 mb-4">
                     {allergens.map((allergen, index) => (
@@ -313,7 +369,7 @@ export const MenuItemDetail: React.FC = () => {
                     ))}
                   </div>
                   <p className="text-red-700 text-base bg-red-100 p-3 rounded-xl">
-                    ⚠️ Please inform staff of any allergies before ordering
+                    {t('pleaseTellStaffAboutAllergies')}
                   </p>
                 </motion.div>
               )}
@@ -327,7 +383,7 @@ export const MenuItemDetail: React.FC = () => {
                     transition={{ delay: 0.4, duration: 0.5 }}
                     className="bg-gradient-to-r from-blue-50 to-cyan-50 rounded-2xl p-6 border border-blue-200"
                   >
-                    <h3 className="font-semibold text-blue-900 mb-4 text-xl">🥘 Main Ingredients</h3>
+                    <h3 className="font-semibold text-blue-900 mb-4 text-xl">🥘 {t('mainIngredients')}</h3>
                     <p className="text-blue-800 leading-relaxed text-base">{ingredients}</p>
                   </motion.div>
                 )}
@@ -339,7 +395,7 @@ export const MenuItemDetail: React.FC = () => {
                     transition={{ delay: 0.5, duration: 0.5 }}
                     className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl p-6 border border-green-200"
                   >
-                    <h3 className="font-semibold text-green-900 mb-4 text-xl">👨‍🍳 Cooking Method</h3>
+                    <h3 className="font-semibold text-green-900 mb-4 text-xl">👨‍🍳 {t('cookingMethod')}</h3>
                     <p className="text-green-800 leading-relaxed text-base">{cookingMethod}</p>
                   </motion.div>
                 )}
@@ -351,7 +407,7 @@ export const MenuItemDetail: React.FC = () => {
                     transition={{ delay: 0.6, duration: 0.5 }}
                     className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-2xl p-6 border border-purple-200"
                   >
-                    <h3 className="font-semibold text-purple-900 mb-4 text-xl">🏮 Cultural Background</h3>
+                    <h3 className="font-semibold text-purple-900 mb-4 text-xl">🏮 {t('culturalBackground')}</h3>
                     <p className="text-purple-800 leading-relaxed text-base">{culturalNote}</p>
                   </motion.div>
                 )}
@@ -365,7 +421,7 @@ export const MenuItemDetail: React.FC = () => {
                   transition={{ delay: 0.7, duration: 0.5 }}
                   className="bg-gradient-to-r from-gray-50 to-slate-50 rounded-2xl p-6 border border-gray-200"
                 >
-                  <h3 className="font-semibold text-gray-900 mb-4 text-xl">🏷️ Tags</h3>
+                  <h3 className="font-semibold text-gray-900 mb-4 text-xl">🏷️ {t('tags')}</h3>
                   <div className="flex flex-wrap gap-3">
                     {tags.map((tag, index) => (
                       <span 
