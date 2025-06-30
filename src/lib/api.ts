@@ -1,5 +1,32 @@
 import axios from 'axios';
-import { TranslationResponse, ApiError, ApiMenuItem } from '@/types';
+import { 
+  TranslationResponse, 
+  ApiError, 
+  ApiMenuItem,
+  DBSessionResponse,
+  DBSessionDetail,
+  DBProgressResponse,
+  DBProgressEvent,
+  DBSearchResponse,
+  DBMenuItem,
+  DBSearchOptions
+} from '@/types';
+import { 
+  config, 
+  shouldUseDatabase, 
+  getOptimalDataSource,
+  isFallbackEnabled,
+  startPerformanceTracking,
+  endPerformanceTracking,
+  logDebug,
+  logError,
+  logWarning,
+  isEmergencyRedisMode
+} from './config';
+import { 
+  transformDatabaseToTranslationResponse,
+  transformDatabaseProgressToUIProgress
+} from './utils/dataTransformation';
 
 // バックエンドのベースURL（環境変数から取得、バージョン含む）
 const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -1125,6 +1152,507 @@ export class MenuTranslationApi {
         throw new Error(error.response.data.detail || 'Failed to get image info');
       }
       throw new Error('Failed to get image info');
+    }
+  }
+
+  // ===============================================
+  // 🗄️ Database Integration API Methods
+  // ===============================================
+
+  /**
+   * Create a new database session
+   */
+  static async createDatabaseSession(menuItems: string[], metadata?: Record<string, any>): Promise<DBSessionResponse> {
+    const trackingId = startPerformanceTracking('database', 'createSession');
+    
+    try {
+      logDebug('Creating database session with', menuItems.length, 'items');
+      
+      const sessionId = `db_session_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+      
+      const response = await api.post(`${config.api.databaseEndpointBase}/sessions`, {
+        session_id: sessionId,
+        menu_items: menuItems,
+        metadata: {
+          source: 'web_app',
+          frontend_version: '2.0',
+          created_via: 'database_integration',
+          ...metadata
+        }
+      });
+
+      endPerformanceTracking(trackingId, true);
+      logDebug('Database session created:', response.data.session_id);
+      
+      return response.data;
+    } catch (error) {
+      endPerformanceTracking(trackingId, false, error instanceof Error ? error.message : 'Unknown error');
+      logError('Failed to create database session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get complete database session with all items
+   */
+  static async getDatabaseSession(sessionId: string): Promise<DBSessionDetail> {
+    const trackingId = startPerformanceTracking('database', 'getSession');
+    
+    try {
+      logDebug('Fetching database session:', sessionId);
+      
+      const response = await api.get(`${config.api.databaseEndpointBase}/sessions/${encodeURIComponent(sessionId)}`);
+      
+      endPerformanceTracking(trackingId, true);
+      logDebug('Database session fetched:', sessionId, 'with', response.data.menu_items?.length || 0, 'items');
+      
+      return response.data;
+    } catch (error) {
+      endPerformanceTracking(trackingId, false, error instanceof Error ? error.message : 'Unknown error');
+      logError('Failed to get database session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get database session progress
+   */
+  static async getDatabaseProgress(sessionId: string): Promise<DBProgressResponse> {
+    const trackingId = startPerformanceTracking('database', 'getProgress');
+    
+    try {
+      logDebug('Fetching database progress:', sessionId);
+      
+      const response = await api.get(`${config.api.databaseEndpointBase}/sessions/${encodeURIComponent(sessionId)}/progress`);
+      
+      endPerformanceTracking(trackingId, true);
+      logDebug('Database progress fetched:', sessionId);
+      
+      return response.data;
+    } catch (error) {
+      endPerformanceTracking(trackingId, false, error instanceof Error ? error.message : 'Unknown error');
+      logError('Failed to get database progress:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Stream database progress via SSE
+   */
+  static async streamDatabaseProgress(
+    sessionId: string,
+    onEvent: (event: DBProgressEvent) => void
+  ): Promise<() => void> {
+    logDebug('Starting database SSE stream for session:', sessionId);
+    
+    const sseUrl = `${API_BASE_URL}${config.api.databaseEndpointBase}/sessions/${encodeURIComponent(sessionId)}/stream`;
+    
+    let eventSource: EventSource | null = null;
+    let isCleanedUp = false;
+    
+    const cleanup = () => {
+      if (isCleanedUp) return;
+      isCleanedUp = true;
+      
+      logDebug('Cleaning up database SSE connection for:', sessionId);
+      
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+    };
+    
+    try {
+      eventSource = new EventSource(sseUrl);
+      
+      eventSource.onopen = () => {
+        logDebug('Database SSE connection established for:', sessionId);
+      };
+      
+      eventSource.onmessage = (event) => {
+        if (isCleanedUp) return;
+        
+        try {
+          const eventData = JSON.parse(event.data) as DBProgressEvent;
+          logDebug('Database SSE event received:', eventData.type);
+          
+          onEvent(eventData);
+        } catch (parseError) {
+          logError('Failed to parse database SSE event:', parseError);
+        }
+      };
+      
+      eventSource.onerror = (error) => {
+        logError('Database SSE connection error:', error);
+        cleanup();
+      };
+      
+    } catch (error) {
+      logError('Failed to create database SSE connection:', error);
+      cleanup();
+      throw error;
+    }
+    
+    return cleanup;
+  }
+
+  /**
+   * Search database menu items
+   */
+  static async searchDatabaseMenuItems(
+    query: string,
+    category?: string,
+    limit: number = 10,
+    page: number = 1
+  ): Promise<DBSearchResponse> {
+    const trackingId = startPerformanceTracking('database', 'search');
+    
+    try {
+      logDebug('Searching database menu items:', query);
+      
+      const params = new URLSearchParams({
+        query,
+        limit: limit.toString(),
+        page: page.toString()
+      });
+      
+      if (category) {
+        params.append('category', category);
+      }
+      
+      const response = await api.get(`${config.api.databaseEndpointBase}/search?${params.toString()}`);
+      
+      endPerformanceTracking(trackingId, true);
+      logDebug('Database search completed:', response.data.total_results, 'results');
+      
+      return response.data;
+    } catch (error) {
+      endPerformanceTracking(trackingId, false, error instanceof Error ? error.message : 'Unknown error');
+      logError('Failed to search database menu items:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Migrate Redis session to database
+   */
+  static async migrateRedisToDatabase(sessionId: string, itemCount: number): Promise<any> {
+    const trackingId = startPerformanceTracking('database', 'migration');
+    
+    try {
+      logDebug('Migrating Redis session to database:', sessionId);
+      
+      const response = await api.post(`${config.api.databaseEndpointBase}/migrate/${encodeURIComponent(sessionId)}`, {
+        item_count: itemCount,
+        force_migration: false
+      });
+      
+      endPerformanceTracking(trackingId, true);
+      logDebug('Migration completed for session:', sessionId);
+      
+      return response.data;
+    } catch (error) {
+      endPerformanceTracking(trackingId, false, error instanceof Error ? error.message : 'Unknown error');
+      logError('Failed to migrate session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Health check for database API
+   */
+  static async healthCheckDatabase(): Promise<{ status: string; responseTime: number }> {
+    const startTime = Date.now();
+    
+    try {
+      const response = await api.get('/health', { timeout: config.api.healthCheckTimeout });
+      const responseTime = Date.now() - startTime;
+      
+      logDebug('Database health check passed:', responseTime + 'ms');
+      
+      return {
+        status: response.data.status || 'ok',
+        responseTime
+      };
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      logError('Database health check failed:', error);
+      
+      throw {
+        status: 'error',
+        responseTime,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  // ===============================================
+  // 🔄 Smart Translation with Database Integration
+  // ===============================================
+
+  /**
+   * Enhanced translateMenuWithProgress that chooses optimal data source
+   * Maintains backward compatibility with existing UI components
+   */
+  static async translateMenuWithEnhancedProgress(
+    file: File,
+    onProgress: (stage: number, status: string, message: string, data?: unknown) => void,
+    existingSessionId?: string
+  ): Promise<TranslationResponse> {
+    // Check for emergency Redis mode
+    if (isEmergencyRedisMode()) {
+      logWarning('Emergency Redis mode active - using Redis flow');
+      return this.translateMenuWithProgress(file, onProgress, existingSessionId);
+    }
+
+    const dataSource = getOptimalDataSource();
+    logDebug('Using data source:', dataSource);
+
+    switch (dataSource) {
+      case 'database':
+        return this.translateMenuWithDatabaseFlow(file, onProgress, existingSessionId);
+      
+      case 'hybrid':
+        return this.translateMenuWithHybridFlow(file, onProgress, existingSessionId);
+      
+      default:
+        return this.translateMenuWithProgress(file, onProgress, existingSessionId);
+    }
+  }
+
+  /**
+   * Database-first translation flow
+   */
+  private static async translateMenuWithDatabaseFlow(
+    file: File,
+    onProgress: (stage: number, status: string, message: string, data?: unknown) => void,
+    existingSessionId?: string
+  ): Promise<TranslationResponse> {
+    logDebug('Starting database translation flow');
+    
+    try {
+      // Use existing Redis flow for initial processing but prepare for database storage
+      const redisResult = await this.translateMenuWithProgress(file, (stage, status, message, data) => {
+        // Transform progress events if needed and forward to UI
+        onProgress(stage, status, message, data);
+      }, existingSessionId);
+
+      // If we have a session ID, try to migrate to database for future queries
+      if (redisResult.session_id && redisResult.menu_items) {
+        try {
+          await this.createDatabaseSession(
+            redisResult.menu_items.map(item => item.japanese_name || ''),
+            { 
+              migrated_from_redis: true,
+              redis_session_id: redisResult.session_id
+            }
+          );
+          logDebug('Session data prepared for database storage');
+        } catch (dbError) {
+          logWarning('Failed to create database session, continuing with Redis result:', dbError);
+        }
+      }
+
+      return redisResult;
+    } catch (error) {
+      logError('Database flow failed, no fallback available:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Hybrid translation flow with intelligent fallback
+   */
+  private static async translateMenuWithHybridFlow(
+    file: File,
+    onProgress: (stage: number, status: string, message: string, data?: unknown) => void,
+    existingSessionId?: string
+  ): Promise<TranslationResponse> {
+    logDebug('Starting hybrid translation flow');
+    
+    // First, try to check if we have database connectivity
+    let databaseAvailable = false;
+    
+    try {
+      await this.healthCheckDatabase();
+      databaseAvailable = true;
+      logDebug('Database is available for hybrid flow');
+    } catch (error) {
+      logWarning('Database not available, using Redis-only flow:', error);
+    }
+
+    if (databaseAvailable) {
+      try {
+        return await this.translateMenuWithDatabaseFlow(file, onProgress, existingSessionId);
+      } catch (dbError) {
+        logWarning('Database flow failed in hybrid mode, falling back to Redis:', dbError);
+      }
+    }
+
+    // Fallback to Redis
+    return this.translateMenuWithProgress(file, onProgress, existingSessionId);
+  }
+
+  // ===============================================
+  // 🔧 Utility Methods
+  // ===============================================
+
+  /**
+   * Transform database session to existing TranslationResponse format
+   * Ensures zero impact on existing UI components
+   */
+  static transformDatabaseSessionToResponse(session: DBSessionDetail): TranslationResponse {
+    return transformDatabaseToTranslationResponse(session);
+  }
+
+  /**
+   * Test database connectivity and performance
+   */
+  static async testDatabasePerformance(): Promise<{
+    available: boolean;
+    responseTime: number;
+    error?: string;
+  }> {
+    try {
+      const healthResult = await this.healthCheckDatabase();
+      return {
+        available: true,
+        responseTime: healthResult.responseTime
+      };
+    } catch (error) {
+      return {
+        available: false,
+        responseTime: -1,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+}
+
+export const menuTranslationApi = new MenuTranslationApi();
+
+// ===== Database API Integration =====
+// 新しいDB APIクライアント（既存機能に影響なし）
+
+export class MenuTranslationDBApi {
+  /**
+   * データベースに新しいセッションを作成
+   */
+  static async createSession(sessionId: string, menuItems: string[]): Promise<DBSessionResponse> {
+    try {
+      const response = await api.post<DBSessionResponse>('/menu-translation/sessions', {
+        session_id: sessionId,
+        menu_items: menuItems,
+        metadata: {
+          source: 'web_app',
+          timestamp: new Date().toISOString()
+        }
+      });
+      
+      console.log(`[DB API] ✅ Session created: ${sessionId}`);
+      return response.data;
+    } catch (error) {
+      console.error('[DB API] ❌ Failed to create session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * セッションの完全なデータを取得
+   */
+  static async getSession(sessionId: string): Promise<DBSessionDetail | null> {
+    try {
+      const response = await api.get<DBSessionDetail>(`/menu-translation/sessions/${sessionId}`);
+      console.log(`[DB API] ✅ Session retrieved: ${sessionId}`);
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        console.log(`[DB API] ℹ️ Session not found: ${sessionId}`);
+        return null;
+      }
+      console.error('[DB API] ❌ Failed to get session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * セッションの進捗を取得
+   */
+  static async getProgress(sessionId: string): Promise<DBProgressResponse | null> {
+    try {
+      const response = await api.get<DBProgressResponse>(`/menu-translation/sessions/${sessionId}/progress`);
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      console.error('[DB API] ❌ Failed to get progress:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 特定のメニューアイテムを取得
+   */
+  static async getMenuItem(sessionId: string, itemId: number): Promise<DBMenuItem | null> {
+    try {
+      const response = await api.get<DBMenuItem>(`/menu-translation/sessions/${sessionId}/items/${itemId}`);
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      console.error('[DB API] ❌ Failed to get menu item:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * メニューアイテムを検索
+   */
+  static async searchMenuItems(query: string, options?: DBSearchOptions): Promise<DBSearchResponse> {
+    try {
+      const params = new URLSearchParams({ query });
+      if (options?.category) params.append('category', options.category);
+      if (options?.limit) params.append('limit', options.limit.toString());
+      if (options?.page) params.append('page', options.page.toString());
+
+      const response = await api.get<DBSearchResponse>(`/menu-translation/search?${params}`);
+      return response.data;
+    } catch (error) {
+      console.error('[DB API] ❌ Failed to search menu items:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * セッションを完了としてマーク
+   */
+  static async completeSession(sessionId: string): Promise<void> {
+    try {
+      await api.post(`/menu-translation/sessions/${sessionId}/complete`);
+      console.log(`[DB API] ✅ Session marked as complete: ${sessionId}`);
+    } catch (error) {
+      console.error('[DB API] ❌ Failed to complete session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * RedisからDBへデータを移行
+   */
+  static async migrateFromRedis(sessionId: string, itemCount: number): Promise<boolean> {
+    try {
+      const response = await api.post(`/menu-translation/migrate/${sessionId}`, {
+        item_count: itemCount,
+        force_migration: false
+      });
+      
+      console.log(`[DB API] ✅ Migration completed: ${sessionId}`);
+      return response.data.success;
+    } catch (error) {
+      console.error('[DB API] ❌ Failed to migrate from Redis:', error);
+      return false;
     }
   }
 } 

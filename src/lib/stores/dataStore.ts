@@ -3,6 +3,20 @@ import { create } from 'zustand';
 import { useProgressStore } from './progressStore';
 import { useUIStore } from './uiStore';
 import { MenuTranslationApi } from '../api';
+import { 
+  config, 
+  getOptimalDataSource, 
+  logDebug, 
+  logError, 
+  logWarning,
+  startPerformanceTracking,
+  endPerformanceTracking
+} from '../config';
+import { 
+  transformDatabaseToMenuData,
+  validateTransformedMenuData
+} from '../utils/dataTransformation';
+import { DBSessionDetail } from '@/types';
 
 // データ処理関連の型定義
 interface MenuData {
@@ -38,6 +52,33 @@ interface DataStore {
 
   // === デバッグ用テストメソッド ===
   testS3ImageMatching: () => Promise<number>;
+
+  // === 🗄️ Database Integration Methods ===
+  dataSource: 'redis' | 'database' | 'hybrid';
+  databaseSessionId: string | null;
+  databaseMenuData: MenuData | null;
+  lastDatabaseSync: number | null;
+  
+  // Data source management
+  setDataSource: (source: 'redis' | 'database' | 'hybrid') => void;
+  getUnifiedMenuData: () => Promise<MenuData | null>;
+  getCurrentMenuDataWithFallback: () => MenuData | null;
+  
+  // Database operations
+  syncWithDatabase: (sessionId: string) => Promise<void>;
+  getDatabaseMenuData: (sessionId: string) => Promise<MenuData | null>;
+  searchDatabaseItems: (query: string, category?: string) => Promise<unknown[]>;
+  
+  // Hybrid operations
+  getHybridMenuData: () => Promise<MenuData | null>;
+  validateDataConsistency: () => Promise<boolean>;
+  
+  // Performance monitoring
+  trackDataSourcePerformance: (operation: string) => void;
+  getDataSourceStats: () => {
+    redis: { operations: number; avgLatency: number; errors: number };
+    database: { operations: number; avgLatency: number; errors: number };
+  };
 }
 
 // カテゴリ絵文字マッピング
@@ -216,7 +257,19 @@ const getLegacyImageUrl = (item: any, stageData: any): string | null => {
   return null;
 };
 
-export const useDataStore = create<DataStore>(() => ({
+// Performance tracking for data sources
+const dataSourceStats = {
+  redis: { operations: 0, totalLatency: 0, errors: 0 },
+  database: { operations: 0, totalLatency: 0, errors: 0 }
+};
+
+export const useDataStore = create<DataStore>((set, get) => ({
+  // === 🗄️ Database Integration State ===
+  dataSource: getOptimalDataSource(),
+  databaseSessionId: null,
+  databaseMenuData: null,
+  lastDatabaseSync: null,
+
   // === データ処理メソッド ===
   getCurrentMenuData: () => {
     const { stageData, currentStage } = useProgressStore.getState();
@@ -680,4 +733,292 @@ export const useDataStore = create<DataStore>(() => ({
     console.log(`📊 [DataStore] S3 cache contents:`, Object.keys(s3ImageCache));
     return Object.keys(s3ImageCache).length;
   },
+
+  // === 🗄️ Database Integration Methods ===
+
+  setDataSource: (source) => {
+    logDebug('Setting data source to:', source);
+    set({ dataSource: source });
+  },
+
+  getCurrentMenuDataWithFallback: () => {
+    const { dataSource, databaseMenuData } = get();
+    
+    // Try database first if available
+    if (dataSource === 'database' && databaseMenuData) {
+      logDebug('Using cached database menu data');
+      return databaseMenuData;
+    }
+    
+    // Fallback to existing Redis-based logic
+    const redisData = get().getCurrentMenuData();
+    logDebug('Using Redis menu data as fallback');
+    return redisData;
+  },
+
+  getUnifiedMenuData: async () => {
+    const { dataSource } = get();
+    
+    logDebug('Getting unified menu data with source:', dataSource);
+    
+    switch (dataSource) {
+      case 'database':
+        return await get().getDatabaseMenuData(get().databaseSessionId || '');
+      
+      case 'hybrid':
+        return await get().getHybridMenuData();
+      
+      default:
+        return get().getCurrentMenuData();
+    }
+  },
+
+  getDatabaseMenuData: async (sessionId: string) => {
+    if (!sessionId) {
+      logWarning('No session ID provided for database data retrieval');
+      return null;
+    }
+
+    const trackingId = startPerformanceTracking('database', 'getMenuData');
+    
+    try {
+      logDebug('Fetching database menu data for session:', sessionId);
+      
+      const session = await MenuTranslationApi.getDatabaseSession(sessionId);
+      const transformedData = transformDatabaseToMenuData(session);
+      
+      // Validate the transformed data
+      if (!validateTransformedMenuData(transformedData)) {
+        throw new Error('Transformed database data failed validation');
+      }
+      
+      // Cache the data
+      set({
+        databaseMenuData: transformedData,
+        databaseSessionId: sessionId,
+        lastDatabaseSync: Date.now()
+      });
+      
+      endPerformanceTracking(trackingId, true);
+      logDebug('Database menu data retrieved and cached');
+      
+      return transformedData;
+    } catch (error) {
+      endPerformanceTracking(trackingId, false, error instanceof Error ? error.message : 'Unknown error');
+      logError('Failed to get database menu data:', error);
+      
+      // Update error stats
+      dataSourceStats.database.errors++;
+      
+      return null;
+    }
+  },
+
+  syncWithDatabase: async (sessionId: string) => {
+    logDebug('Syncing with database for session:', sessionId);
+    
+    try {
+      const menuData = await get().getDatabaseMenuData(sessionId);
+      
+      if (menuData) {
+        logDebug('Database sync successful');
+      } else {
+        logWarning('Database sync returned no data');
+      }
+    } catch (error) {
+      logError('Database sync failed:', error);
+    }
+  },
+
+  getHybridMenuData: async () => {
+    logDebug('Getting hybrid menu data (database + Redis fallback)');
+    
+    const { databaseSessionId } = get();
+    
+    try {
+      // Try database first
+      if (databaseSessionId) {
+        const dbData = await get().getDatabaseMenuData(databaseSessionId);
+        if (dbData && Object.keys(dbData).length > 0) {
+          logDebug('Hybrid mode: using database data');
+          return dbData;
+        }
+      }
+    } catch (error) {
+      logWarning('Database unavailable in hybrid mode, falling back to Redis:', error);
+    }
+    
+    // Fallback to Redis
+    const redisData = get().getCurrentMenuData();
+    logDebug('Hybrid mode: using Redis fallback data');
+    return redisData;
+  },
+
+  searchDatabaseItems: async (query: string, category?: string) => {
+    const trackingId = startPerformanceTracking('database', 'search');
+    
+    try {
+      logDebug('Searching database items:', query, category);
+      
+      const results = await MenuTranslationApi.searchDatabaseMenuItems(query, category, 20);
+      
+      // Transform database items to match UI expectations
+      const transformedItems = results.results.map(item => ({
+        id: item.item_id,
+        japanese_name: item.japanese_text,
+        english_name: item.english_text,
+        description: item.description,
+        category: item.category,
+        image_url: item.image_url,
+        // Add compatibility fields
+        name: item.english_text || item.japanese_text,
+        original: item.japanese_text,
+        price: '',
+        _dbData: item
+      }));
+      
+      endPerformanceTracking(trackingId, true);
+      logDebug('Database search completed:', transformedItems.length, 'results');
+      
+      return transformedItems;
+    } catch (error) {
+      endPerformanceTracking(trackingId, false, error instanceof Error ? error.message : 'Unknown error');
+      logError('Database search failed:', error);
+      
+      dataSourceStats.database.errors++;
+      return [];
+    }
+  },
+
+  validateDataConsistency: async () => {
+    logDebug('Validating data consistency between Redis and Database');
+    
+    try {
+      const redisData = get().getCurrentMenuData();
+      const { databaseSessionId } = get();
+      
+      if (!databaseSessionId) {
+        logWarning('No database session ID for consistency validation');
+        return false;
+      }
+      
+      const dbData = await get().getDatabaseMenuData(databaseSessionId);
+      
+      if (!redisData || !dbData) {
+        logWarning('Missing data for consistency validation');
+        return false;
+      }
+      
+      // Compare category counts
+      const redisCategories = Object.keys(redisData).length;
+      const dbCategories = Object.keys(dbData).length;
+      
+      if (redisCategories !== dbCategories) {
+        logWarning('Category count mismatch:', { redis: redisCategories, db: dbCategories });
+        return false;
+      }
+      
+      // Compare item counts per category
+      for (const category of Object.keys(redisData)) {
+        const redisCount = redisData[category]?.length || 0;
+        const dbCount = dbData[category]?.length || 0;
+        
+        if (redisCount !== dbCount) {
+          logWarning(`Item count mismatch in ${category}:`, { redis: redisCount, db: dbCount });
+          return false;
+        }
+      }
+      
+      logDebug('Data consistency validation passed');
+      return true;
+    } catch (error) {
+      logError('Data consistency validation failed:', error);
+      return false;
+    }
+  },
+
+  trackDataSourcePerformance: (operation: string) => {
+    const { dataSource } = get();
+    
+    if (dataSource === 'database') {
+      dataSourceStats.database.operations++;
+    } else {
+      dataSourceStats.redis.operations++;
+    }
+    
+    logDebug(`Performance tracked: ${dataSource} ${operation}`);
+  },
+
+  getDataSourceStats: () => {
+    return {
+      redis: {
+        operations: dataSourceStats.redis.operations,
+        avgLatency: dataSourceStats.redis.operations > 0 ? 
+          dataSourceStats.redis.totalLatency / dataSourceStats.redis.operations : 0,
+        errors: dataSourceStats.redis.errors
+      },
+      database: {
+        operations: dataSourceStats.database.operations,
+        avgLatency: dataSourceStats.database.operations > 0 ? 
+          dataSourceStats.database.totalLatency / dataSourceStats.database.operations : 0,
+        errors: dataSourceStats.database.errors
+      }
+    };
+  },
 })); 
+
+// === DB統合機能の追加 ===
+// 既存の機能に影響を与えずに、DB機能を追加
+import { useHybridDataStore } from './hybridDataStore';
+import dbConfig from '../config';
+
+// DataStoreインターフェースを拡張
+interface DataStoreWithDB extends DataStore {
+  // DB統合フラグ
+  isDBEnabled: () => boolean;
+  
+  // ハイブリッドデータ取得
+  getMenuItemWithDB: (sessionId: string, itemId: number) => Promise<any>;
+  
+  // DB同期トリガー
+  syncWithDB: (sessionId: string) => Promise<void>;
+}
+
+// DB統合機能を追加
+const originalStore = useDataStore.getState();
+
+// DB統合メソッドを追加
+Object.assign(useDataStore.getState(), {
+  isDBEnabled: () => dbConfig.features.useDatabase,
+  
+  getMenuItemWithDB: async (sessionId: string, itemId: number) => {
+    if (!dbConfig.features.useDatabase) {
+      // DB無効時は既存のロジックを使用
+      const menuData = originalStore.getCurrentMenuData();
+      if (!menuData) return null;
+      
+      // メニューデータから該当アイテムを検索
+      for (const items of Object.values(menuData)) {
+        const found = (items as any[]).find((item: any, index: number) => index === itemId);
+        if (found) return found;
+      }
+      return null;
+    }
+    
+    // ハイブリッドストアを使用
+    const hybridStore = useHybridDataStore.getState();
+    return await hybridStore.getMenuItem(sessionId, itemId);
+  },
+  
+  syncWithDB: async (sessionId: string) => {
+    if (!dbConfig.features.useDatabase) return;
+    
+    const hybridStore = useHybridDataStore.getState();
+    await hybridStore.getSession(sessionId);
+  }
+});
+
+// デバッグ用
+if (typeof window !== 'undefined') {
+  (window as any).dataStoreWithDB = useDataStore;
+} 

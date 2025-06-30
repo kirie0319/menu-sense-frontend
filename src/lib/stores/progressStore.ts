@@ -1,4 +1,15 @@
-import { create } from 'zustand'
+import { create } from 'zustand';
+import { 
+  logDebug, 
+  logError, 
+  logWarning,
+  startPerformanceTracking,
+  endPerformanceTracking
+} from '../config';
+import { 
+  transformDatabaseProgressToUIProgress 
+} from '../utils/dataTransformation';
+import { DBProgressEvent, DBProgressResponse } from '@/types';
 
 // 進捗ステージの型定義
 interface ProgressStage {
@@ -129,6 +140,24 @@ interface ProgressStore {
     partialItems: number;
     progressPercent: number;
   } | null;
+
+  // === 🗄️ Database Integration Properties ===
+  progressSource: 'redis' | 'database' | 'hybrid';
+  databaseSessionId?: string;
+  databaseProgress?: DBProgressResponse;
+  databaseStreamCleanup?: () => void;
+  lastDatabaseProgressUpdate?: number;
+  
+  // Database progress methods
+  setProgressSource: (source: 'redis' | 'database' | 'hybrid') => void;
+  updateProgressFromDatabase: (dbEvent: DBProgressEvent) => void;
+  syncProgressWithDatabase: (sessionId: string) => Promise<void>;
+  connectDatabaseStream: (sessionId: string) => Promise<() => void>;
+  disconnectDatabaseStream: () => void;
+  
+  // Unified progress methods
+  getUnifiedProgress: () => Promise<any>;
+  validateProgressConsistency: () => Promise<boolean>;
 }
 
 // Progress Store の実装
@@ -145,6 +174,13 @@ export const useProgressStore = create<ProgressStore>((set, get) => ({
   ],
   stageData: {},
   sessionId: null,
+
+  // === 🗄️ Database Integration State ===
+  progressSource: 'redis',
+  databaseSessionId: undefined,
+  databaseProgress: undefined,
+  databaseStreamCleanup: undefined,
+  lastDatabaseProgressUpdate: undefined,
 
   // === Progress Actions ===
   resetProgress: () => {
@@ -537,6 +573,211 @@ export const useProgressStore = create<ProgressStore>((set, get) => ({
       partialItems,
       progressPercent
     };
+  },
+
+  // === 🗄️ Database Integration Methods ===
+
+  setProgressSource: (source) => {
+    logDebug('Setting progress source to:', source);
+    set({ progressSource: source });
+    
+    // Clean up existing database stream if switching away from database
+    if (source !== 'database') {
+      const { databaseStreamCleanup } = get();
+      if (databaseStreamCleanup) {
+        databaseStreamCleanup();
+        set({ databaseStreamCleanup: undefined });
+      }
+    }
+  },
+
+  updateProgressFromDatabase: (dbEvent: DBProgressEvent) => {
+    logDebug('Updating progress from database event:', dbEvent.type);
+    
+    try {
+      // Transform database event to existing progress format
+      const transformedProgress = transformDatabaseProgressToUIProgress(dbEvent);
+      
+      // Update database-specific state
+      set({
+        databaseProgress: dbEvent.progress,
+        lastDatabaseProgressUpdate: Date.now()
+      });
+      
+      // Call existing updateProgress method - ensures zero UI impact
+      get().updateProgress(
+        transformedProgress.stage,
+        transformedProgress.status,
+        transformedProgress.message,
+        transformedProgress.data
+      );
+      
+      logDebug('Progress updated from database event');
+    } catch (error) {
+      logError('Failed to update progress from database event:', error);
+    }
+  },
+
+  syncProgressWithDatabase: async (sessionId: string) => {
+    const trackingId = startPerformanceTracking('database', 'syncProgress');
+    
+    try {
+      logDebug('Syncing progress with database for session:', sessionId);
+      
+      // Import MenuTranslationApi dynamically to avoid circular dependencies
+      const { MenuTranslationApi } = await import('../api');
+      
+      const progress = await MenuTranslationApi.getDatabaseProgress(sessionId);
+      
+      // Update state
+      set({
+        databaseSessionId: sessionId,
+        databaseProgress: progress,
+        lastDatabaseProgressUpdate: Date.now()
+      });
+      
+      // Transform to existing progress format
+      const fakeEvent: DBProgressEvent = {
+        type: 'progress_update',
+        session_id: sessionId,
+        status: 'active',
+        message: 'Database progress sync',
+        progress: progress,
+        timestamp: new Date().toISOString()
+      };
+      
+      get().updateProgressFromDatabase(fakeEvent);
+      
+      endPerformanceTracking(trackingId, true);
+      logDebug('Progress sync with database completed');
+    } catch (error) {
+      endPerformanceTracking(trackingId, false, error instanceof Error ? error.message : 'Unknown error');
+      logError('Failed to sync progress with database:', error);
+    }
+  },
+
+  connectDatabaseStream: async (sessionId: string) => {
+    logDebug('Connecting to database progress stream for session:', sessionId);
+    
+    try {
+      // Clean up existing stream
+      const { databaseStreamCleanup } = get();
+      if (databaseStreamCleanup) {
+        databaseStreamCleanup();
+      }
+      
+      // Import MenuTranslationApi dynamically
+      const { MenuTranslationApi } = await import('../api');
+      
+      // Connect to database stream
+      const cleanup = await MenuTranslationApi.streamDatabaseProgress(
+        sessionId,
+        (event) => get().updateProgressFromDatabase(event)
+      );
+      
+      // Update state
+      set({
+        databaseSessionId: sessionId,
+        databaseStreamCleanup: cleanup
+      });
+      
+      logDebug('Database progress stream connected');
+      return cleanup;
+    } catch (error) {
+      logError('Failed to connect to database progress stream:', error);
+      throw error;
+    }
+  },
+
+  disconnectDatabaseStream: () => {
+    logDebug('Disconnecting database progress stream');
+    
+    const { databaseStreamCleanup } = get();
+    if (databaseStreamCleanup) {
+      databaseStreamCleanup();
+      set({ 
+        databaseStreamCleanup: undefined,
+        databaseSessionId: undefined 
+      });
+      logDebug('Database progress stream disconnected');
+    }
+  },
+
+  getUnifiedProgress: async () => {
+    const { progressSource, databaseSessionId } = get();
+    
+    logDebug('Getting unified progress with source:', progressSource);
+    
+    switch (progressSource) {
+      case 'database':
+        if (databaseSessionId) {
+          await get().syncProgressWithDatabase(databaseSessionId);
+          return get().databaseProgress;
+        }
+        return null;
+      
+      case 'hybrid':
+        // Try database first, fallback to Redis
+        if (databaseSessionId) {
+          try {
+            await get().syncProgressWithDatabase(databaseSessionId);
+            return get().databaseProgress;
+          } catch (error) {
+            logWarning('Database progress unavailable in hybrid mode, using Redis:', error);
+          }
+        }
+        return get().getOverallProgress();
+      
+      default:
+        return get().getOverallProgress();
+    }
+  },
+
+  validateProgressConsistency: async () => {
+    logDebug('Validating progress consistency between Redis and Database');
+    
+    try {
+      const { databaseSessionId } = get();
+      if (!databaseSessionId) {
+        logWarning('No database session ID for progress consistency validation');
+        return false;
+      }
+      
+      // Get Redis progress
+      const redisProgress = get().getOverallProgress();
+      
+      // Get database progress
+      await get().syncProgressWithDatabase(databaseSessionId);
+      const dbProgress = get().databaseProgress;
+      
+      if (!redisProgress || !dbProgress) {
+        logWarning('Missing progress data for consistency validation');
+        return false;
+      }
+      
+      // Compare key metrics
+      const redisTotal = redisProgress.totalItems;
+      const dbTotal = dbProgress.total_items;
+      
+      if (redisTotal !== dbTotal) {
+        logWarning('Total items mismatch:', { redis: redisTotal, db: dbTotal });
+        return false;
+      }
+      
+      const redisCompleted = redisProgress.completedItems;
+      const dbCompleted = dbProgress.fully_completed;
+      
+      if (Math.abs(redisCompleted - dbCompleted) > 1) { // Allow 1 item difference
+        logWarning('Completed items mismatch:', { redis: redisCompleted, db: dbCompleted });
+        return false;
+      }
+      
+      logDebug('Progress consistency validation passed');
+      return true;
+    } catch (error) {
+      logError('Progress consistency validation failed:', error);
+      return false;
+    }
   },
 }));
 

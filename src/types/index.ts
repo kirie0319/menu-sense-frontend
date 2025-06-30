@@ -129,4 +129,101 @@ export interface IncrementalMenuProps {
   translatedCategories?: Record<string, any[]>;
   finalMenu?: Record<string, any[]>;
   currentStage: number;
+}
+
+// ===============================================
+// 🗄️ Database Integration Types
+// ===============================================
+
+export interface DBMenuItem {
+  id: string;
+  session_id: string;
+  item_id: number;
+  japanese_text: string;
+  english_text?: string;
+  category?: string;
+  description?: string;
+  image_url?: string;
+  translation_status: 'pending' | 'completed' | 'failed';
+  description_status: 'pending' | 'completed' | 'failed';
+  image_status: 'pending' | 'completed' | 'failed';
+  providers: ProcessingProvider[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProcessingProvider {
+  stage: 'translation' | 'description' | 'image';
+  provider: string;
+  processing_time_ms?: number;
+  fallback_used: boolean;
+  processed_at: string;
+}
+
+export interface DBSessionResponse {
+  success: boolean;
+  session_id: string;
+  database_id: string;
+  total_items: number;
+  status: string;
+  created_at: string;
+  message: string;
+}
+
+export interface DBSessionDetail {
+  session_id: string;
+  total_items: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  metadata: Record<string, any>;
+  menu_items: DBMenuItem[];
+  progress: DBProgressInfo;
+}
+
+export interface DBProgressInfo {
+  total_items: number;
+  translation_completed: number;
+  description_completed: number;
+  image_completed: number;
+  fully_completed: number;
+  progress_percentage: number;
+}
+
+export interface DBProgressResponse {
+  session_id: string;
+  progress: DBProgressInfo;
+  last_updated: string;
+}
+
+export interface DBSearchOptions {
+  category?: string;
+  limit?: number;
+  page?: number;
+}
+
+export interface DBSearchResponse {
+  query: string;
+  total_results: number;
+  results: DBMenuItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_pages: number;
+  };
+}
+
+export interface DBProgressEvent {
+  type: 'progress_update' | 'item_completed' | 'session_completed' | 'error';
+  session_id: string;
+  timestamp: string;
+  data?: any;
+}
+
+export interface DataSourceConfig {
+  source: 'redis' | 'database' | 'hybrid';
+  fallbackEnabled: boolean;
+  healthCheckInterval: number;
+  maxLatency: number;
 } 
