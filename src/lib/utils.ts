@@ -8,6 +8,70 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * ユニークなセッションIDを生成
+ */
+export function generateSessionId(): string {
+  // crypto.randomUUID()が利用可能な場合は使用
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  
+  // フォールバック: タイムスタンプ + ランダム文字列
+  const timestamp = Date.now().toString();
+  const random = Math.random().toString(36).substr(2, 9);
+  return `session-${timestamp}-${random}`;
+}
+
+/**
+ * localStorageからファイルデータを取得してFileオブジェクトに復元
+ */
+export async function restoreFileFromStorage(storageKey: string = 'uploadedFile'): Promise<File | null> {
+  try {
+    const savedFileData = localStorage.getItem(storageKey);
+    if (!savedFileData) {
+      console.warn('[Utils] No file data found in localStorage');
+      return null;
+    }
+
+    const fileData = JSON.parse(savedFileData);
+    
+    // Base64データをBlobに変換
+    const response = await fetch(fileData.data);
+    const blob = await response.blob();
+    
+    // Fileオブジェクトとして復元
+    const file = new File([blob], fileData.name, { 
+      type: fileData.type,
+      lastModified: Date.now()
+    });
+    
+    console.log('[Utils] ✅ File restored from localStorage:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    });
+    
+    return file;
+    
+  } catch (error) {
+    console.error('[Utils] ❌ Failed to restore file from localStorage:', error);
+    return null;
+  }
+}
+
+/**
+ * localStorageからファイルデータを削除
+ */
+export function clearStoredFile(storageKey: string = 'uploadedFile'): void {
+  try {
+    localStorage.removeItem(storageKey);
+    console.log('[Utils] 🧹 Stored file data cleared');
+  } catch (error) {
+    console.error('[Utils] ❌ Failed to clear stored file:', error);
+  }
+}
+
+/**
  * ファイルサイズを人間が読みやすい形式に変換
  */
 export function formatFileSize(bytes: number): string {

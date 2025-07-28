@@ -1,85 +1,8 @@
-export interface MenuItem {
-  id: number;
-  category: string;
-  categoryName?: string;
-  original: string;
-  name: string;
-  subtitle: string;
-  description: string;
-  ingredients: string;
-  cookingMethod: string;
-  culturalNote: string;
-  price: number;
-  image: string;
-  allergens: string[];
-  tags: string[];
-  spiceLevel: number;
-  isTranslated?: boolean;
-  isComplete?: boolean;
-  isPartiallyComplete?: boolean;
-  isCurrentlyProcessing?: boolean;
-  processingState?: string;
-  hasDescription?: boolean;
-  wasTranslated?: boolean;
-  rawData?: Record<string, unknown>;
-  
-  // 基本的なメニューアイテム (旧型定義との互換性)
-  japanese_name?: string;
-  english_name?: string;
-}
+export * from '@/features/menu/types';
+export * from './ui';
+export * from './components';
 
-export interface Category {
-  id: string;
-  name: string;
-  icon: string;
-  count?: number;
-  translated?: number;
-  completed?: number;
-  partiallyCompleted?: number;
-  isCurrentlyProcessing?: boolean;
-  progress?: number;
-  realtimeTranslated?: number;
-  realtimeCompleted?: number;
-  realtimePartial?: number;
-}
-
-export interface StageData {
-  categories?: Record<string, unknown[]>;
-  translatedCategories?: Record<string, unknown[]>;
-  finalMenu?: Record<string, unknown[]>;
-  partialResults?: Record<string, unknown[]>;
-  partialMenu?: Record<string, unknown[]>;
-  progress_percent?: number;
-  processing_category?: string;
-  elapsed_time?: number;
-  heartbeat?: boolean;
-  category_completed?: boolean;
-  category_progress?: number;
-}
-
-export interface MenuItemState {
-  japanese_name?: string;
-  english_name?: string;
-  description?: string;
-  price?: string;
-  stage: number; // どの段階まで完了しているか
-}
-
-// API用の基本的なメニューアイテム
-export interface ApiMenuItem {
-  japanese_name?: string;
-  english_name?: string;
-  description?: string;
-  price?: string;
-}
-
-export interface TranslationResponse {
-  extracted_text: string;
-  menu_items: ApiMenuItem[];
-  message?: string;
-  session_id?: string;
-}
-
+import type { TranslationResponse } from '@/features/menu/types';
 export interface TranslationState {
   isLoading: boolean;
   result: TranslationResponse | null;
@@ -90,50 +13,6 @@ export interface TranslationState {
 export interface ApiError {
   detail: string;
 }
-
-export interface MenuCategoryListProps {
-  categories: Category[];
-  selectedCategory: string;
-  onCategorySelect: (categoryId: string) => void;
-  currentStage: number;
-  stageData?: StageData;
-}
-
-export interface MenuItemCardProps {
-  item: MenuItem;
-  isFavorite: boolean;
-  onToggleFavorite: (itemId: number) => void;
-  onItemClick: (item: MenuItem) => void;
-  newItemAnimations?: Set<number>;
-  streamingUpdates?: Set<string>;
-}
-
-export interface TranslationStatusProps {
-  isAnalyzing: boolean;
-  currentStage: number;
-  stageData?: StageData;
-  stage1Progress: number;
-  stage2Progress: number;
-  detectedItems: Array<{text: string, delay: number}>;
-  analysisItems: Array<{text: string, delay: number}>;
-  onCancelAnalysis: () => void;
-
-  realtimeMenuItems?: MenuItem[];
-  stage3Completed?: boolean;
-  isDebugVisible?: boolean;
-  lastUpdateTime?: number;
-}
-
-export interface IncrementalMenuProps {
-  categories?: Record<string, any[]>;
-  translatedCategories?: Record<string, any[]>;
-  finalMenu?: Record<string, any[]>;
-  currentStage: number;
-}
-
-// ===============================================
-// 🗄️ Database Integration Types
-// ===============================================
 
 export interface DBMenuItem {
   id: string;
@@ -183,12 +62,14 @@ export interface DBSessionDetail {
 }
 
 export interface DBProgressInfo {
+  session_id: string;
   total_items: number;
   translation_completed: number;
   description_completed: number;
   image_completed: number;
   fully_completed: number;
   progress_percentage: number;
+  last_updated: string;
 }
 
 export interface DBProgressResponse {
@@ -215,10 +96,14 @@ export interface DBSearchResponse {
 }
 
 export interface DBProgressEvent {
-  type: 'progress_update' | 'item_completed' | 'session_completed' | 'error';
+  type: 'progress_update' | 'item_completed' | 'session_completed' | 'error' | 'heartbeat';
   session_id: string;
   timestamp: string;
+  status?: string;
+  message?: string;
   data?: any;
+  progress?: DBProgressInfo;
+  item?: DBMenuItem;
 }
 
 export interface DataSourceConfig {
@@ -226,4 +111,101 @@ export interface DataSourceConfig {
   fallbackEnabled: boolean;
   healthCheckInterval: number;
   maxLatency: number;
+}
+
+// ===============================================
+// 🚀 Backend API Types (New)
+// ===============================================
+
+// Pipeline API Types
+export interface PipelineHealthResponse {
+  status: string;
+  service: string;
+  version: string;
+  architecture: string;
+  processing_stages: string[];
+  features: string[];
+  sse_channels: string;
+  message: string;
+}
+
+export interface PipelineProcessResponse {
+  session_id: string;
+  status: string;
+  processing_steps: {
+    step1_ocr?: ProcessingStep;
+    step2_mapping?: ProcessingStep;
+    step3_categorize?: ProcessingStep;
+    step4_parallel_tasks?: ProcessingStep;
+  };
+  final_results?: any;
+  saved_menu_items?: any[];
+  processing_time?: number;
+  message: string;
+  sse_info: {
+    channel: string;
+    message_types: string[];
+    realtime_updates: string;
+  };
+}
+
+export interface ProcessingStep {
+  db_updated: boolean;
+  sse_broadcasted: boolean;
+  [key: string]: any;
+}
+
+export interface SessionStatusResponse {
+  session_id: string;
+  status: string;
+  current_stage: number;
+  stages_completed: string[];
+  stages_data: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+  menu_ids: string[];
+}
+
+// SSE API Types
+export interface SSEHealthResponse {
+  status: string;
+  service: string;
+  version: string;
+  redis_available: boolean;
+  active_sessions: number;
+  active_connections: number;
+  connection_details: Record<string, number>;
+  features: string[];
+  message: string;
+}
+
+export interface SSEEventType {
+  type: 'stage_completed' | 'progress_update' | 'menu_update' | 'batch_completed' | 'error' | 'connection_established' |
+        'translation_batch_completed' | 'description_batch_completed' | 'allergen_batch_completed' | 
+        'ingredient_batch_completed' | 'search_image_batch_completed' | 'parallel_tasks_started';
+  session_id: string;
+  timestamp: string;
+  data?: any;
+  message?: string;
+}
+
+export interface SSEError {
+  type: 'connection_error' | 'parse_error' | 'timeout';
+  message: string;
+  session_id: string;
+}
+
+// API Configuration Types
+export interface APIConfig {
+  baseURL: string;
+  timeout: number;
+  retryAttempts: number;
+  retryDelay: number;
+}
+
+export interface SSEConfig {
+  reconnectAttempts: number;
+  reconnectDelay: number;
+  heartbeatInterval: number;
+  timeout: number;
 } 

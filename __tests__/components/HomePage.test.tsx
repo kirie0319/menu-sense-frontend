@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import HomePage from '@/components/HomePage'
+import HomePage from '@/page-components/HomePage'
 
 // Mock the store
 const mockSetFile = jest.fn()
@@ -15,8 +15,8 @@ jest.mock('@/lib/store', () => ({
 }))
 
 // Mock components
-jest.mock('@/components/ServerStatus', () => {
-  return function MockServerStatus({ onStatusChange }: any) {
+jest.mock('@/features/debug', () => ({
+  ServerStatus: function MockServerStatus({ onStatusChange }: any) {
     React.useEffect(() => {
       onStatusChange(true)
     }, [onStatusChange])

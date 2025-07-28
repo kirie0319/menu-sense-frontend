@@ -3,12 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, X, RefreshCw, Check, AlertTriangle } from 'lucide-react';
-
-interface CameraCaptureProps {
-  onCapture: (file: File) => void;
-  onClose: () => void;
-  isOpen: boolean;
-}
+import { CameraCaptureProps } from '@/types/components';
 
 const CameraCapture = ({ onCapture, onClose, isOpen }: CameraCaptureProps) => {
   const [stream, setStream] = useState<MediaStream | null>(null);
