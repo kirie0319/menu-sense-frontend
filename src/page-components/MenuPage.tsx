@@ -561,7 +561,7 @@ export const MenuPage: React.FC<MenuPageProps> = ({
   };
 
   // メニュー処理を開始
-  const startMenuProcessing = async () => {
+  const startMenuProcessing = useCallback(() => {
     // 既に処理中の場合は実行しない
     if (isProcessing) {
       console.log('[MenuPage] ⚠️ Processing already in progress, skipping...');
@@ -578,51 +578,55 @@ export const MenuPage: React.FC<MenuPageProps> = ({
     setIsProcessing(true);
     addUpdateLog('info', `Starting menu processing with file: ${file.name} (${file.size} bytes)`);
 
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const processUrl = `${apiUrl}/api/v1/pipeline/process-with-session?session_id=${encodeURIComponent(sessionId)}`;
-      
-      const formData = new FormData();
-      formData.append('file', file);
-
-      addUpdateLog('info', `Calling processing API with session: ${sessionId}`);
-      console.log('[MenuPage] 📤 Sending processing request:', { sessionId, fileName: file.name, fileSize: file.size });
-
-      const response = await fetch(processUrl, {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        addUpdateLog('info', 'Menu processing started successfully', result);
-        console.log('[MenuPage] ✅ Processing started successfully:', result);
+    const processFile = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const processUrl = `${apiUrl}/api/v1/pipeline/process-with-session?session_id=${encodeURIComponent(sessionId)}`;
         
-        // ファイルをクリーンアップ（処理開始後）
-        try {
-          localStorage.removeItem('uploadedFile');
-          console.log('[MenuPage] 🧹 Uploaded file data cleaned from localStorage');
-        } catch (cleanupError) {
-          console.warn('[MenuPage] ⚠️ Failed to cleanup file data:', cleanupError);
+        const formData = new FormData();
+        formData.append('file', file);
+
+        addUpdateLog('info', `Calling processing API with session: ${sessionId}`);
+        console.log('[MenuPage] 📤 Sending processing request:', { sessionId, fileName: file.name, fileSize: file.size });
+
+        const response = await fetch(processUrl, {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          addUpdateLog('info', 'Menu processing started successfully', result);
+          console.log('[MenuPage] ✅ Processing started successfully:', result);
+          
+          // ファイルをクリーンアップ（処理開始後）
+          try {
+            localStorage.removeItem('uploadedFile');
+            console.log('[MenuPage] 🧹 Uploaded file data cleaned from localStorage');
+          } catch (cleanupError) {
+            console.warn('[MenuPage] ⚠️ Failed to cleanup file data:', cleanupError);
+          }
+        } else {
+          const errorMessage = result?.detail || `API Error: ${response.status} ${response.statusText}`;
+          console.error('[MenuPage] ❌ API Error:', { status: response.status, statusText: response.statusText, detail: result });
+          throw new Error(errorMessage);
         }
-      } else {
-        const errorMessage = result?.detail || `API Error: ${response.status} ${response.statusText}`;
-        console.error('[MenuPage] ❌ API Error:', { status: response.status, statusText: response.statusText, detail: result });
-        throw new Error(errorMessage);
+      } catch (error) {
+        console.error('[MenuPage] ❌ Failed to start menu processing:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Failed to start menu processing';
+        setError(errorMessage);
+        addUpdateLog('error', 'Failed to start menu processing', { error: errorMessage });
+      } finally {
+        setIsProcessing(false);
       }
-    } catch (error) {
-      console.error('[MenuPage] ❌ Failed to start menu processing:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to start menu processing';
-      setError(errorMessage);
-      addUpdateLog('error', 'Failed to start menu processing', { error: errorMessage });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+    };
+
+    processFile();
+  }, [isProcessing, sessionId]);
 
   // 初期メニューデータの取得
-  const fetchMenuData = useCallback(async (skipError = false) => {
+  const fetchMenuData = useCallback((skipError = false) => {
     if (!sessionId) {
       if (!skipError) {
         setError('Session ID not found');
@@ -631,65 +635,69 @@ export const MenuPage: React.FC<MenuPageProps> = ({
       return;
     }
 
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const menuUrl = `${apiUrl}/api/v1/menu-images/menus/${sessionId}`;
-      
-      console.log('[MenuPage] 📊 Fetching menu data:', { sessionId, url: menuUrl });
-      
-      const response = await fetch(menuUrl);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[MenuPage] ✅ Menu data received:', { menuCount: data.menus?.length || 0, totalCount: data.total_count });
+    const fetchData = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const menuUrl = `${apiUrl}/api/v1/menu-images/menus/${sessionId}`;
         
-        setMenuItems(data.menus || []);
+        console.log('[MenuPage] 📊 Fetching menu data:', { sessionId, url: menuUrl });
         
-        // メニューデータを受信したことを記録
-        if (data.menus && data.menus.length > 0) {
-          setHasReceivedMenuData(true);
-          addUpdateLog('info', `Menu data loaded: ${data.menus.length} items - switching to menu view`);
+        const response = await fetch(menuUrl);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[MenuPage] ✅ Menu data received:', { menuCount: data.menus?.length || 0, totalCount: data.total_count });
+          
+          setMenuItems(data.menus || []);
+          
+          // メニューデータを受信したことを記録
+          if (data.menus && data.menus.length > 0) {
+            setHasReceivedMenuData(true);
+            addUpdateLog('info', `Menu data loaded: ${data.menus.length} items - switching to menu view`);
+          }
+          
+          setProcessingStats({
+            totalItems: data.menus?.length || 0,
+            translatedItems: data.menus?.filter((item: MenuItemData) => item.translation).length || 0,
+            descriptionItems: data.menus?.filter((item: MenuItemData) => item.description).length || 0,
+            allergenItems: data.menus?.filter((item: MenuItemData) => item.allergy).length || 0,
+            ingredientItems: data.menus?.filter((item: MenuItemData) => item.ingredient).length || 0,
+            imageItems: data.menus?.filter((item: MenuItemData) => item.gen_image).length || 0,
+          });
+          
+          setIsInitializing(false);
+        } else if (response.status === 404 && skipError) {
+          // セッションが存在しない場合（新規処理の場合）
+          console.log('[MenuPage] ℹ️ Session not found (skip error mode), will create new session');
+          setMenuItems([]);
+          setIsInitializing(false);
+        } else if (response.status === 404) {
+          // セッションが存在しない場合
+          console.log('[MenuPage] ℹ️ Session not found, keeping skeleton active');
+          setMenuItems([]);
+          addUpdateLog('info', 'No existing session found - waiting for processing to start');
+          // 注意: isInitializingはfalseにしない（スケルトンを継続表示）
+        } else {
+          const errorText = await response.text();
+          console.error('[MenuPage] ❌ Failed to fetch menu data:', { 
+            status: response.status, 
+            statusText: response.statusText, 
+            responseText: errorText 
+          });
+          throw new Error(`Failed to fetch menu data: ${response.status} ${response.statusText}`);
         }
-        
-        setProcessingStats({
-          totalItems: data.menus?.length || 0,
-          translatedItems: data.menus?.filter((item: MenuItemData) => item.translation).length || 0,
-          descriptionItems: data.menus?.filter((item: MenuItemData) => item.description).length || 0,
-          allergenItems: data.menus?.filter((item: MenuItemData) => item.allergy).length || 0,
-          ingredientItems: data.menus?.filter((item: MenuItemData) => item.ingredient).length || 0,
-          imageItems: data.menus?.filter((item: MenuItemData) => item.gen_image).length || 0,
-        });
-        
+      } catch (error) {
+        console.error('[MenuPage] ❌ Menu data fetch error:', error);
+        if (!skipError) {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to load menu data';
+          setError(errorMessage);
+          addUpdateLog('error', 'Failed to load menu data', { error: errorMessage });
+        }
         setIsInitializing(false);
-      } else if (response.status === 404 && skipError) {
-        // セッションが存在しない場合（新規処理の場合）
-        console.log('[MenuPage] ℹ️ Session not found (skip error mode), will create new session');
-        setMenuItems([]);
-        setIsInitializing(false);
-      } else if (response.status === 404) {
-        // セッションが存在しない場合
-        console.log('[MenuPage] ℹ️ Session not found, keeping skeleton active');
-        setMenuItems([]);
-        addUpdateLog('info', 'No existing session found - waiting for processing to start');
-        // 注意: isInitializingはfalseにしない（スケルトンを継続表示）
-      } else {
-        const errorText = await response.text();
-        console.error('[MenuPage] ❌ Failed to fetch menu data:', { 
-          status: response.status, 
-          statusText: response.statusText, 
-          responseText: errorText 
-        });
-        throw new Error(`Failed to fetch menu data: ${response.status} ${response.statusText}`);
       }
-    } catch (error) {
-      console.error('[MenuPage] ❌ Menu data fetch error:', error);
-      if (!skipError) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to load menu data';
-        setError(errorMessage);
-        addUpdateLog('error', 'Failed to load menu data', { error: errorMessage });
-      }
-      setIsInitializing(false);
-    }
+    };
+
+    fetchData();
   }, [sessionId]);
 
   // SSE接続の開始
@@ -896,7 +904,7 @@ export const MenuPage: React.FC<MenuPageProps> = ({
   useEffect(() => {
     let isInitializing = false; // 重複実行防止フラグ
     
-    const initializeMenuPage = async () => {
+    const initializeMenuPage = () => {
       // 重複実行チェック
       if (isInitializing) {
         console.log('[MenuPage] ⚠️ Initialization already in progress, skipping...');
@@ -904,70 +912,74 @@ export const MenuPage: React.FC<MenuPageProps> = ({
       }
       
       isInitializing = true;
-      
-      try {
-        if (!sessionId) {
-          setError('Session ID not found');
-          setIsInitializing(false);
-          return;
-        }
 
-        console.log('[MenuPage] 🚀 Initializing with session:', sessionId);
-
-        // SSE接続を開始
-        startSSEConnection();
-
-        // URLパラメータからセッションIDが来ている場合は既存セッション
-        const urlSessionId = searchParams.get('sessionId');
-        
-        if (urlSessionId) {
-          // 既存セッション：セッション状態をチェック
-          addUpdateLog('info', `Loading existing session: ${urlSessionId}`);
-          
-          try {
-            // セッションの有効性を確認
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-            const statusResponse = await fetch(`${apiUrl}/api/v1/pipeline/session/${encodeURIComponent(urlSessionId)}/status`);
-            
-            if (statusResponse.ok) {
-              const statusData = await statusResponse.json();
-              console.log('[MenuPage] ✅ Session is valid:', statusData);
-              addUpdateLog('info', `Session status: ${statusData.status || 'unknown'}`);
-            } else {
-              console.log('[MenuPage] ⚠️ Session status check failed, proceeding with data fetch');
-            }
-          } catch (statusError) {
-            console.log('[MenuPage] ⚠️ Failed to check session status:', statusError);
-          }
-          
-          // メニューデータを取得
-          await fetchMenuData();
-        } else {
-          // 新規セッション：ファイル処理を開始
-          addUpdateLog('info', `Starting new session: ${sessionId}`);
-          console.log('[MenuPage] 🆕 New session, checking for uploaded file...');
-          
-          // アップロードされたファイルがあるかチェック
-          const storedFile = localStorage.getItem('uploadedFile');
-          if (storedFile) {
-            console.log('[MenuPage] 📁 Found uploaded file, starting processing...');
-            addUpdateLog('info', 'Found uploaded file - starting processing...');
-            // ファイル処理を開始（スケルトンは継続表示）
-            await startMenuProcessing();
-          } else {
-            console.log('[MenuPage] ⚠️ No uploaded file found');
-            addUpdateLog('info', 'No uploaded file found - please upload a file first');
+      const runInitialization = async () => {
+        try {
+          if (!sessionId) {
+            setError('Session ID not found');
             setIsInitializing(false);
+            return;
           }
+
+          console.log('[MenuPage] 🚀 Initializing with session:', sessionId);
+
+          // SSE接続を開始
+          startSSEConnection();
+
+          // URLパラメータからセッションIDが来ている場合は既存セッション
+          const urlSessionId = searchParams.get('sessionId');
+          
+          if (urlSessionId) {
+            // 既存セッション：セッション状態をチェック
+            addUpdateLog('info', `Loading existing session: ${urlSessionId}`);
+            
+            try {
+              // セッションの有効性を確認
+              const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+              const statusResponse = await fetch(`${apiUrl}/api/v1/pipeline/session/${encodeURIComponent(urlSessionId)}/status`);
+              
+              if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                console.log('[MenuPage] ✅ Session is valid:', statusData);
+                addUpdateLog('info', `Session status: ${statusData.status || 'unknown'}`);
+              } else {
+                console.log('[MenuPage] ⚠️ Session status check failed, proceeding with data fetch');
+              }
+            } catch (statusError) {
+              console.log('[MenuPage] ⚠️ Failed to check session status:', statusError);
+            }
+            
+            // メニューデータを取得
+            fetchMenuData();
+          } else {
+            // 新規セッション：ファイル処理を開始
+            addUpdateLog('info', `Starting new session: ${sessionId}`);
+            console.log('[MenuPage] 🆕 New session, checking for uploaded file...');
+            
+            // アップロードされたファイルがあるかチェック
+            const storedFile = localStorage.getItem('uploadedFile');
+            if (storedFile) {
+              console.log('[MenuPage] 📁 Found uploaded file, starting processing...');
+              addUpdateLog('info', 'Found uploaded file - starting processing...');
+              // ファイル処理を開始（スケルトンは継続表示）
+              startMenuProcessing();
+            } else {
+              console.log('[MenuPage] ⚠️ No uploaded file found');
+              addUpdateLog('info', 'No uploaded file found - please upload a file first');
+              setIsInitializing(false);
+            }
+          }
+        } catch (error) {
+          console.error('[MenuPage] ❌ Initialization failed:', error);
+          setError(error instanceof Error ? error.message : 'Initialization failed');
+          addUpdateLog('error', 'Initialization failed', error);
+          setIsInitializing(false);
+        } finally {
+          isInitializing = false;
         }
-      } catch (error) {
-        console.error('[MenuPage] ❌ Initialization failed:', error);
-        setError(error instanceof Error ? error.message : 'Initialization failed');
-        addUpdateLog('error', 'Initialization failed', error);
-        setIsInitializing(false);
-      } finally {
-        isInitializing = false;
-      }
+      };
+
+      runInitialization();
     };
 
     initializeMenuPage();

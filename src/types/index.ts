@@ -2,13 +2,6 @@ export * from '@/features/menu/types';
 export * from './ui';
 export * from './components';
 
-import type { TranslationResponse } from '@/features/menu/types';
-export interface TranslationState {
-  isLoading: boolean;
-  result: TranslationResponse | null;
-  error: string | null;
-  selectedFile: File | null;
-}
 
 export interface ApiError {
   detail: string;

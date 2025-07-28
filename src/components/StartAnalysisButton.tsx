@@ -20,13 +20,13 @@ const StartAnalysisButton: React.FC<StartAnalysisButtonProps> = ({
     <>
       {/* Fixed Footer with Start Analyze Button */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 sm:p-6 safe-area-pb z-50">
-        <div className="max-w-4xl mx-auto px-4 sm:px-4">
+        <div className="max-w-4xl mx-auto px-4 sm:px-4 flex flex-col items-center">
           <Button
             onClick={onStartAnalysis}
             disabled={!isServerHealthy}
             variant={isServerHealthy ? 'primary' : 'secondary'}
             size="lg"
-            className="w-full max-w-xs mx-auto block"
+            className="w-full max-w-xs"
           >
             <Camera className="w-5 h-5" />
             <span>
